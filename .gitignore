@@ -1,6 +1,6 @@
-# Dev — no va al repo (solo producción: duolingo-adhc.user.js + LICENSE)
-duolingo-adhc-dev.user.js
-duolingo-adhc.test.js
+# Dev — no va al repo (solo producción: duolingo-adhd.user.js + LICENSE)
+duolingo-adhd-dev.user.js
+duolingo-adhd.test.js
 mutation-test.js
 DESIGN.md
 harness-lesson.html

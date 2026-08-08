@@ -1,15 +1,15 @@
-# Duolingo ADHC — Progress bar milestones (for the easily distracted / bored)
+# Duolingo ADHD — Progress bar milestones (for the easily distracted / bored)
 
 <div align="center">
 
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![Tampermonkey](https://img.shields.io/badge/tampermonkey-userscript-green)](https://www.tampermonkey.net/)
 [![Version](https://img.shields.io/badge/version-1.5.3-orange)](https://greasyfork.org/es-419/scripts/590127)
-[![GreasyFork](https://img.shields.io/badge/Greasy%20Fork-Install%20Now-4ca64c)](https://greasyfork.org/es-419/scripts/590127-duolingo-adhc-progress-bar-milestones-for-the-easily-distracted-bored)
+[![GreasyFork](https://img.shields.io/badge/Greasy%20Fork-Install%20Now-4ca64c)](https://greasyfork.org/es-419/scripts/590127-duolingo-adhd-progress-bar-milestones-for-the-easily-distracted-bored)
 
 </div>
 
-<video src="https://raw.githubusercontent.com/MoriNo23/Duolingo_ADHC/master/uiAni.webm"
+<video src="https://raw.githubusercontent.com/MoriNo23/Duolingo_ADHD/master/uiAni.webm"
        autoplay loop muted playsinline width="560">
 </video>
 
@@ -19,7 +19,7 @@
 
 ### 🎯 Why this Userscript?
 
-For minds with **ADHD** or anyone prone to boredom/distraction, a long and uniform progress bar can feel tedious and endless. **Duolingo ADHC** turns the native progress bar into a milestone-based reward system with **progressive material rarities**:
+For minds with **ADHD** or anyone prone to boredom/distraction, a long and uniform progress bar can feel tedious and endless. **Duolingo ADHD** turns the native progress bar into a milestone-based reward system with **progressive material rarities**:
 
 1. 🪵 **Wood**: The humble beginning (encourages you to get past it quickly!).
 2. 🥉 **Bronze**: First milestone reached.
