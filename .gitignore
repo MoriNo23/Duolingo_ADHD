@@ -1,20 +1,48 @@
-# Dev — no va al repo (solo producción: duolingo-adhd.user.js + LICENSE)
+# GitHub es prod-only. Trackeado: duolingo-adhd.user.js, LICENSE, README.md, .gitignore.
+# Todo lo dev vive solo local. Regla: archivo dev nuevo entra con su línea de ignore en el mismo commit.
+
+# Dev sources
 duolingo-adhd-dev.user.js
+
+# Tests
 duolingo-adhd.test.js
 mutation-test.js
-DESIGN.md
-harness-lesson.html
-harness-state.html
-showcase.html
-cdp-shot.py
-launch-browsers.sh
+
+# Build tools
+build.py
 _do_prod.py
-axe.min.js
-html2canvas.min.js
-gif.js
-gif.worker.js
-www.duolingo.com.zip
-extracted/
-browsers/
-screenshots/
+
+# Design docs (consolidados en docs/ local)
+DESIGN.md
+UI-BRIEF.md
+UI-PROPOSAL.md
+docs/
+
+# Planning + journal (local, no se publican)
+openspec/
+vault/
+
+# Agent-local
+.hermes/
+.opencode/
+
+# Snapshots/dumps SingleFile (fuera del repo 100%)
+*.singlefile.html
+Duolingo - Aprende*.html
+
+# Media + zips + logs (capturas/recordings de trabajo: NUNCA se publican solos.
+# Si un video va al README, se sube a release/ y se trackea a proposito.)
+*.webm
+*.mp4
+*.gif
+*.jpg
+*.jpeg
+*.png
+*.zip
 *.log
+
+# Excepciones: material del README (embebido en README.md, linkeado desde
+# badges/videos). Trackear a proposito, no por accidente.
+!demo.gif
+!demo.mp4
+!settings.jpg
