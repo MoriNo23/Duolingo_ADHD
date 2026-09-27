@@ -1,15 +1,20 @@
-# GitHub es prod-only. Trackeado: duolingo-adhd.user.js, LICENSE, README.md, .gitignore.
-# Todo lo dev vive solo local. Regla: archivo dev nuevo entra con su línea de ignore en el mismo commit.
+# El deliverable y su infraestructura de test viven en el repo.
+# Trackeado: duolingo-adhd.user.js, package.json, test/, mutation-test.js,
+# .github/workflows/, LICENSE, README.md, .gitignore.
+# El plan, las notas de diseño y el material pesado siguen siendo locales.
+# Regla: archivo local nuevo entra con su línea de ignore en el mismo commit.
+#
+# test-published-file-ci: el archivo publicado es el sujeto de test, así que la
+# infraestructura de test SÍ se trackea — un clon tiene que poder correr los checks.
+# Se retiró la copia dev (duolingo-adhd-dev.user.js) y el build (build.py): no hay
+# segundo archivo del script que se pueda desincronizar del que se instala.
 
-# Dev sources
-duolingo-adhd-dev.user.js
+# Tests (trackeados a propósito: los corre GitHub Actions)
+# test/
+# mutation-test.js
+# package.json
 
-# Tests
-duolingo-adhd.test.js
-mutation-test.js
-
-# Build tools
-build.py
+# Herramientas legacy (retiradas)
 _do_prod.py
 
 # Design docs (consolidados en docs/ local)
@@ -25,6 +30,7 @@ vault/
 # Agent-local
 .hermes/
 .opencode/
+.pi/
 
 # Snapshots/dumps SingleFile (fuera del repo 100%)
 *.singlefile.html

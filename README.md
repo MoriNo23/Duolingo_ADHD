@@ -21,8 +21,10 @@ Duolingo's progress bar is one long, uniform line. When you have trouble staying
 
 - The bar becomes a **sequence of segments** instead of one continuous sweep.
 - Each segment carries a **material tier** — Wood → Bronze → Silver → Streak → Diamond → **Super** — with its own texture, colour and signature animation.
-- In **timer mode** (on by default) every segment starts at the top tier and **decays while you take too long on it**. Answer fast and you freeze a better tier. The tier you land on gets recorded in the bar, so your lesson ends up looking like a record of how you actually did.
-- A **continuous rail** above the bar shows how much budget is left and which tier you're currently on track to reach.
+- In **timer mode** (on by default) every segment starts at the top tier and **races you down the ladder while you take too long on it**. Answer fast and you freeze a better tier. The tier you land on gets recorded in the bar, so your lesson ends up looking like a record of how you actually did.
+- A **continuous rail** above the bar shows how much budget is left in the current lap and which tier you're on track to reach.
+- The ladder moves in **laps, not continuously**: the rail holds one tier for the whole lap, and every time it runs out it recharges **one tier lower** — Super → Diamond → Streak → Silver → Bronze → Wood. The tier you freeze is the one the rail was showing **at the moment you closed**, not the best one you brushed against earlier.
+- **You never lose.** Wood is the floor, laps keep counting, and there is no failure state to fall into: running long simply costs you tiers. The segments are a record that pushes you to finish the lesson, not an exam with a trick question.
 
 ## Who it's for, and what it actually does
 
@@ -63,16 +65,15 @@ Open the settings panel with the **tab docked to the right edge** of the screen.
 |---|---|---|
 | **Language** | your browser locale | Language of the settings panel UI (`es` / `en`). |
 | **Segments per lesson** | **5** (4 separators) | How many pieces the bar is split into. 2–13. Fewer = longer chunks; more = more frequent feedback. |
-| **Timer mode** | **on** | Per-segment time budget with tier decay. Turn it off to get the plain positional tier ladder with no clock. |
-| **Goal (sec)** | **10m 0s** | Total time budget per segment. Every segment gets the same budget, so the goal slider is what makes the whole ladder harder or easier. |
+| **Timer mode** | **on** | Per-segment time budget with the tier ladder racing you down. Turn it off to get the plain positional tier ladder with no clock. |
+| **Goal (sec)** | **10m 0s** | Time budget per lap. This is the only difficulty dial: a shorter goal means laps run out faster and the ladder drops more tiers within the same segment. |
 | **+ seconds** | **0s** | Fine adjustment on top of the minutes, in 5s steps. |
-| **Band hardness** | **35%** | 0 = generous (wide safety margin at the top tiers), 100 = strict (narrow margins, tiers drop fast). This is the main difficulty dial. |
 | **Reward effects** | **on** | Full-screen celebration when a segment is closed on a high tier: **Streak** → animated flames, **Diamond** → faceted crystals, **Super** → a shower of Duo. Lower tiers keep the particle burst only. |
 | **Test effects** | — | Cycles all six bursts and the lost state on the live bar, so you can tune the look without waiting. |
 | **Local journal** | **off** | Starts counting lessons, segments, average time, day streak and total lessons. Off by default; nothing is recorded until you enable it. |
 | **Reset values** | — | Restores all defaults (keeps your chosen language). |
 
-**Turning timer mode off** is the thing to try first if the decay feels punishing: you keep the segmented bar and the tier textures, and lose only the clock and the rail.
+**Turning timer mode off** is the thing to try first if the ladder feels punishing: you keep the segmented bar and the tier textures, and lose only the clock and the rail.
 
 ### Configuración (español)
 
@@ -80,23 +81,22 @@ Open the settings panel with the **tab docked to the right edge** of the screen.
 |---|---|---|
 | **Idioma** | el locale del navegador | Idioma de la interfaz del panel (`es` / `en`). |
 | **Tramos por lección** | **5** (4 separadores) | En cuántos trozos se divide la barra. 2–13. Menos = trozos más largos; más = feedback más seguido. |
-| **Modo tiempo** | **activado** | Presupuesto de tiempo por tramo con decaimiento de peldaño. Si lo apagás queda la escalera posicional de tiers, sin cronómetro. |
-| **Objetivo (seg)** | **10m 0s** | Presupuesto total por tramo. Todos los tramos reciben el mismo, así que este slider es lo que hace la escalera más fácil o más difícil. |
+| **Modo tiempo** | **activado** | Presupuesto de tiempo por tramo con la escalera de peldaños bajándote. Si lo apagás queda la escalera posicional de tiers, sin cronómetro. |
+| **Objetivo (seg)** | **10m 0s** | Presupuesto de cada vuelta. Es el único dial de dificultad: menos tiempo = las vueltas se agotan antes y la escalera baja más peldaños dentro del mismo tramo. |
 | **+ segundos** | **0s** | Ajuste fino sobre los minutos, en pasos de 5s. |
-| **Dureza de bandas** | **35%** | 0 = generosa (mucho margen arriba), 100 = exigente (márgenes angostos, los peldaños caen rápido). Este es el dial principal de dificultad. |
 | **Efectos de recompensa** | **activado** | Celebración a pantalla completa al cerrar un tramo de peldaño alto: **Racha** → llamas animadas, **Diamante** → cristales facetados, **Super** → lluvia de Duo. Los peldaños bajos conservan solo las partículas. |
-| **Probar efectos** | — | Cicla los seis bursts y el estado perdido sobre la barra real, para que puedas ver los efectos sin esperar. |
+| **Probar efectos** | — | Cicla los seis bursts y un escalón a la baja sobre la barra real, para que puedas ver los efectos sin esperar. |
 | **Diario local** | **desactivado** | Empieza a contar lecciones, tramos, tiempo medio, racha de días y lecciones totales. Apagado por defecto; no se registra nada hasta que lo actives. |
 | **Restablecer valores** | — | Vuelve todo a los valores por defecto (conserva el idioma que elegiste). |
 
-**Lo primero para probar si el decaimiento te parece muy duro:** apagá el **modo tiempo**. Conservás la barra segmentada y las texturas de los peldaños; perdés solo el cronómetro y el riel.
+**Lo primero para probar si la escalera te parece muy dura:** apagá el **modo tiempo**. Conservás la barra segmentada y las texturas de los peldaños; perdés solo el cronómetro y el riel.
 
 ## Roadmap
 
 Planned, in order:
 
 1. **Sound.** Short, tasteful feedback on tier changes and closed segments. Opt-in, off by default, and no sound that can get grating on repeat.
-2. **UX improvements.** Continued polish on the rail, the panel and how the decay reads at a glance.
+2. **UX improvements.** Continued polish on the rail, the panel and how the lap ladder reads at a glance.
 3. **More features in other areas.** Beyond the progress bar.
 
 Suggestions for any of these are welcome — see below.

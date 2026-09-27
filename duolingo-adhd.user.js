@@ -2,9 +2,9 @@
 // @name           Duolingo ADHD — Progress bar milestones (for the easily distracted / bored)
 // @name:es        Duolingo ADHD — Hitos de barra de progreso (para los que se aburren / se distraen)
 // @namespace      https://github.com/MoriNo23/duolingo-adhd
-// @version        2.9.0
-// @description    Splits the lesson progress bar into segments. Timer mode: each segment starts at Super tier and decays down the tier ladder (Wood→Super) as the budget burns — close fast to freeze a better tier. Full-screen reward effects on the high tiers (Streak/Diamond/Super), particles, Baloo 2 clock, local journal + EN/ES settings. Keeps Duolingo's native design.
-// @description:en Splits the lesson progress bar into segments. Timer mode: each segment starts at Super tier and decays down the tier ladder (Wood→Super) as the budget burns — close fast to freeze a better tier. Full-screen reward effects on the high tiers (Streak/Diamond/Super), particles, Baloo 2 clock, local journal + EN/ES settings. Keeps Duolingo's native design.
+// @version        2.13.0
+// @description    Divide la barra de progreso de la lección en tramos. Modo tiempo: cada TRAMO arranca en el techo (Super) y cada vez que el riel se agota se recarga un peldaño más abajo (Super→Madera) — el peldaño de la vuelta en la que cierres el tramo es el que queda congelado. Cerrá rápido para congelar mejor jerarquía. Efectos de recompensa a pantalla completa en los peldaños altos (Racha/Diamante/Super), partículas, cronómetro Baloo 2, diario local + panel EN/ES. Mantiene el diseño nativo de Duolingo.
+// @description:en Splits the lesson progress bar into segments. Timer mode: every segment starts at the top tier (Super) and each time the rail runs out it recharges one tier lower (Super→Wood) — the tier of the lap you close the segment on is the one that gets frozen. Close fast to freeze a better tier. Full-screen reward effects on the high tiers (Streak/Diamond/Super), particles, Baloo 2 clock, local journal + EN/ES settings. Keeps Duolingo's native design.
 // @description:es Divide la barra de progreso de la lección en tramos. Modo tiempo: cada tramo arranca en el nivel Super y va bajando de peldaño (Madera→Super) mientras se quema el presupuesto — cerrá rápido para congelar mejor jerarquía. Efectos de recompensa a pantalla completa en los peldaños altos (Racha/Diamante/Super), partículas, cronómetro Baloo 2, diario local + panel EN/ES. Mantiene el diseño nativo de Duolingo.
 // @author         Mori
 // @license        MIT
@@ -60,7 +60,8 @@
 'use strict';
 
 /* =====================================================================
-   PURE CORE  (testeable en Node via module.exports; uso compartido navegador)
+   PURE CORE  (núcleo puro; se comparte con el arnés de test via el enganche
+              __ADHD_TEST__ — ver test/harness/core-loader.js)
    ===================================================================== */
 const RARITY = [
   { name: 'madera',  color: '#8d6e63' },  // Nivel 0 = feo, hace valorar el resto
@@ -77,18 +78,20 @@ const DEFAULTS = {
   separators: 4,          // fronteras de tramo (la barra queda en separators+1 tramos)
   lang: 'es',             // idioma del panel: 'es' | 'en'
   // Feature 1: cronómetro por separador (arena-timer-overhaul: ON por defecto)
-  timerMode: true,        // ON = decaimiento por bandas (nuevo) | OFF = solo separadores
+  timerMode: true,        // ON = escalera por vueltas (nuevo) | OFF = solo separadores
   timerMinutes: 10,       // minutos por tramo (1–30)
   timerSeconds: 0,        // segundos adicionales (0–59)
   timerShowLabel: true,   // efectos de recompensa al cerrar tramo (racha+)
-  timerHardness: 35,      // dureza de bandas 0–100 (0=generosa, 100=exigente)
+  // rail-fixed-lap-ceiling: la clave `timerHardness` ya no se lee ni se escribe.
+  // Sigue en DEFAULTS para que los cfgs guardados sigan cargando sin romper.
+  timerHardness: 35,
   // Feature 3: diario local (persiste via GM_setValue, nunca push)
   journalEnabled: false,  // contadores diarios simples
 };
 
 // ---------- timer-mode-ux constantes + preview (pure core) ----------
 // arena-timer-overhaul: BLINK_THRESHOLD, PREVIEW_CLASSES y previewClass fueron
-// reemplazados por la mecánica de bandas (bandsFor/rungAt/bandEdges/rungClass,
+// reemplazados por la escalera por vueltas (ladderAt/tierForLap/rungClass,
 // ver la sección arena-timer-overhaul en el Feature 1) y la urgencia frac > 0.8.
 
 // ---------- i18n (panel de ajustes) ----------
@@ -103,8 +106,8 @@ const I18N = {
     // timer-mode-ux: secciones del panel
     secCrono:        'Cronómetro',
     hintBar:         'Corta la barra en tramos (sin hitos marcados). Al cerrar cada tramo: partículas + jerarquía congelada.',
-    hintTimer:       'Los tramos arrancan en el techo (nivel Super) y bajan un peldaño por cada franja de presupuesto quemada. Cerrá rápido para congelar mejor jerarquía.',
-    hintTimerGoal:   'Cada franja de la línea de decaimiento es un peldaño: el color que haya bajo el playhead al cerrar el tramo queda grabado. Dureza alta = franjas del techo más angostas. Pasá el cursor por una franja para ver su peldaño y rango.',
+    hintTimer:       'Cada tramo arranca en el techo (Super) y baja un peldaño cada vez que el riel se recarga. Cerrá rápido para congelar mejor jerarquía.',
+    hintTimerGoal:   'El riel se agota, se recarga y baja un peldaño. El color bajo la cabeza al cerrar el tramo es el que queda grabado. El objetivo es el largo de cada vuelta: menos tiempo, más peldaños. Pasá el cursor por el riel para ver a dónde vas.',
     hintJournal:     'Cuenta lecciones, tramos y tiempos. Se guarda solo en tu navegador.',
     // Feature 1: cronómetro
     secDiario:       'Diario local',
@@ -115,10 +118,8 @@ const I18N = {
     railRacha:       'RACHA',
     railDiamante:    'DIAMANTE',
     railSuper:       'SUPER',
-    railPerdido:     'PERDIDO',
     lblTimerMode:    'Modo tiempo',
     lblTimerFixed:   'Objetivo (seg)',
-    lblTimerHardness: 'Dureza de bandas (0 generosa–100 exigente)',
     lblTimerLabel:   'Efectos de recompensa',
     btnTestFx:       'Probar efectos',
     // Feature 3: diario
@@ -140,8 +141,8 @@ const I18N = {
     // timer-mode-ux: panel sections
     secCrono:        'Timer',
     hintBar:         'Splits the bar into segments (no milestone markers). Closing each segment: particles + frozen tier.',
-    hintTimer:       'Segments start at the ceiling (Super tier) and drop a tier per band of budget burned. Close fast to freeze a better tier.',
-    hintTimerGoal:   'Each band of the decay line is a tier: whatever color sits under the playhead when you close the segment gets frozen. Higher hardness = narrower ceiling bands. Hover a band for its tier and time range.',
+    hintTimer:       'Every segment starts at the ceiling (Super tier) and drops a tier each time the rail recharges. Close fast to freeze a better tier.',
+    hintTimerGoal:   'The rail runs out, recharges and drops one tier. The color under the playhead when you close the segment is what gets frozen. The goal is the length of each lap: less time, more tiers.',
     hintJournal:     'Tracks lessons, segments and times. Stored only in your browser.',
     // Feature 1: timer
     secDiario:       'Local journal',
@@ -152,10 +153,8 @@ const I18N = {
     railRacha:       'STREAK',
     railDiamante:    'DIAMOND',
     railSuper:       'SUPER',
-    railPerdido:     'LOST',
     lblTimerMode:    'Timer mode',
     lblTimerFixed:   'Goal (sec)',
-    lblTimerHardness: 'Band hardness (0 generous–100 strict)',
     lblTimerLabel:   'Reward effects',
     btnTestFx:       'Test effects',
     // Feature 3: journal
@@ -239,10 +238,11 @@ function reachedSeparators(pct, separators) {
 // Al completar un tramo, el ratio (tiempo empleado / objetivo) determina el rarity
 // final del tramo — independientemente de su posición.
 
-// ---------- arena-timer-overhaul: escala de rungs + bandas de presupuesto ----------
+// ---------- rail-fixed-lap-ceiling: la escalera de peldaños por VUELTAS ----------
 // El tramo NO tiene jerarquía por posición: la GANA el usuario según cuánto tarda.
-// Arranca proyectado en el techo (Super) y decae un peldaño por cada banda quemada.
-// El rung en el instante del cierre queda grabado; presupuesto agotado = Perdido.
+// Arranca en el techo (Super) y mantiene ese peldaño toda la vuelta; cuando el riel
+// se agota se recarga un peldaño más abajo. El peldaño del instante en que se
+// cierra el tramo queda grabado. No hay defeat: el piso es Madera.
 
 // Tabla de peldaños (piso → techo). from/to definen el gradiente del skin; ink, el texto.
 const RUNGS = [
@@ -254,60 +254,37 @@ const RUNGS = [
   { id: 'super',    label: 'Super',    glyph: '👑',    from: '#8b5cf6', to: '#e9d5ff', ink: '#2a0a52', skin: 'super' },
 ];
 
-// Ausencia de jerarquía: no es un peldaño, es exceder el presupuesto.
-const LOST = { id: 'perdido', label: 'Perdido', glyph: '⌛', from: '#afafaf', to: '#d4d4d4', ink: '#4b4b4b', skin: 'matte' };
-
-// Anchos de banda del presupuesto (techo → piso). bands[0] = franja del techo (Super).
-const BAND_TABLES = {
-  generosa: [0.50, 0.18, 0.12, 0.09, 0.07, 0.04],
-  exigente: [0.10, 0.12, 0.14, 0.17, 0.21, 0.26],
-};
-
-// hardness 0 = generosa, 1 = exigente. Interpola y renormaliza a 1.
-function bandsFor(hardness) {
-  const h = Math.max(0, Math.min(1, hardness));
-  const g = BAND_TABLES.generosa;
-  const e = BAND_TABLES.exigente;
-  const raw = g.map((v, i) => v + (e[i] - v) * h);
-  const sum = raw.reduce((a, c) => a + c, 0);
-  return raw.map((v) => v / sum);
+ // rail-fixed-lap-ceiling: la escalera es una ESCALERA de vueltas, no un
+// decaimiento. El peldaño de la vuelta en curso es su techo, y no baja hasta
+// que la vuelta se recarga. El piso es Madera: pasado ese peldaño las vueltas
+// siguen corriendo en Madera para siempre. No hay estado de derrota: el costo
+// de tardar es un peldaño mas bajo, que es el mecanismo de feedback completo.
+function tierForLap(lap) {
+  const n = Math.max(0, Math.floor(lap || 0));
+  return RUNGS.length - 1 - Math.min(n, RUNGS.length - 1);
 }
 
-// Rung proyectado habiendo quemado `frac` del presupuesto. -1 = Perdido.
-// Ascendente: índice alto = jerarquía alta (RUNGS[5] = Super).
-function rungAt(bands, frac) {
-  if (frac >= 1) return -1;
-  let acc = 0;
-  for (let i = 0; i < bands.length; i++) {
-    acc += bands[i];
-    if (frac < acc) return RUNGS.length - 1 - i;
-  }
-  return 0;
+// Una sola fuente de verdad para "que peldaño esta en play". El lap se DERIVA
+// del elapsed (nunca se cuenta con un mutable) para que no pueda
+// desincronizarse de raceStartTime en un restart, un re-render SPA o el
+// reinicio de leccion (pct < 2).
+function ladderAt(elapsedMs, goalMs) {
+  if (!goalMs || goalMs <= 0) return null;
+  const ms = Math.max(0, elapsedMs || 0);
+  const total = ms / goalMs;
+  const lap = Math.floor(total);
+  return { lap, frac: total - lap, tier: tierForLap(lap) };
 }
 
-// Frontera izquierda de cada rung (ascendente), en fracción del presupuesto.
-function bandEdges(bands) {
-  const n = RUNGS.length;
-  const edges = new Array(n).fill(0);
-  let acc = 0;
-  for (let i = 0; i < bands.length && i < n; i++) {
-    const rung = n - 1 - i;
-    edges[rung] = acc;
-    acc += bands[i];
-  }
-  return edges;
-}
-
-// Pure mapping: rung index → clase CSS del skin. -1 = perdido. Null-safe.
+// Pure mapping: rung index → clase CSS del skin. Null-safe.
+// rail-fixed-lap-ceiling: sin rama -1, ya no existe el peldaño "perdido".
 function rungClass(rungIdx) {
-  if (rungIdx === -1) return 'adhd-rung-perdido';
   if (typeof rungIdx !== 'number' || rungIdx < 0 || rungIdx >= RUNGS.length) return null;
   return 'adhd-rung-' + RUNGS[rungIdx].id;
 }
 
 // Color del texto del mini cronómetro según el rung proyectado.
 function rungTextColor(rungIdx) {
-  if (rungIdx === -1) return '#afafaf';
   const r = RUNGS[rungIdx];
   return r ? r.ink : '#ffffff';
 }
@@ -318,19 +295,20 @@ function getTimerGoalMs(cfg) {
   return (cfg.timerMinutes * 60 + cfg.timerSeconds) * 1000;
 }
 
-// Evalúa el tiempo de una carrera contra el presupuesto con bandas de dureza.
-// Devuelve { frac, rung, isFast, lost } donde rung es índice a RUNGS (-1 = perdido)
-// e isFast = rung >= 4 (diamante o super).
-function evaluateRace(ms, goalMs, hardness) {
+// Evalua el tiempo de una carrera contra el presupuesto por VUELTAS.
+// rail-fixed-lap-ceiling: devuelve { lap, frac, tier, rung, isFast } donde frac es
+// local a la vuelta en play y rung es el techo de esa vuelta — el peldaño que se
+// graba al cerrar, no el mejor que se rozó antes. No hay `lost`: el peldaño más
+// bajo es Madera y siempre se alcanza algo.
+function evaluateRace(ms, goalMs) {
   if (!goalMs || goalMs <= 0) return null;
-  const frac = ms / goalMs;
-  const rung = rungAt(bandsFor(hardness), frac);
-  const isFast = rung >= 4;
-  return { frac, rung, isFast, lost: rung === -1 };
+  const L = ladderAt(ms, goalMs);
+  return { lap: L.lap, frac: L.frac, tier: L.tier, rung: L.tier, isFast: L.tier >= 4 };
 }
 
 function loadTimes() {
-  // En navegador usa GM_getValue; en Node/Tests usa global.__adhd_test_store
+  // Persistencia via GM_getValue. En Node los tests lo sirven con el mismo stub
+  // (test/harness/core-loader.js): no hay rama de test en este archivo.
   if (typeof GM_getValue === 'function') {
     return GM_getValue(STORAGE_KEY_TIMES, []);
   }
@@ -364,7 +342,7 @@ function newRaces(lastHitCount, hits) {
 }
 
 // Evalúa el tiempo de una carrera contra el objetivo fijo (arena-timer-overhaul lo reemplazó
-// por evaluateRace con bandas — ver arriba).
+// por evaluateRace, que hoy proyecta el peldaño de la vuelta en curso — ver arriba).
 
 // =====================================================================
 // Feature 3: Diario local (contadores simples, nunca push)
@@ -453,8 +431,9 @@ const CORE = {
   hexToRgb, lerp, lerpColor,
   levelColor, levelName,
   segmentCount, segLeft, segLength, sepPos, segProgress, currentSeg, reachedSeparators,
-  // arena-timer-overhaul: escala + bandas + evaluación
-  RUNGS, LOST, BAND_TABLES, bandsFor, rungAt, bandEdges, rungClass, rungTextColor,
+  // arena-timer-overhaul: evaluación
+  // rail-fixed-lap-ceiling: escalera por vueltas (ladderAt/tierForLap)
+  RUNGS, tierForLap, ladderAt, rungClass, rungTextColor,
   loadTimes, saveTimes, getAverage, resetTimes, newRaces, evaluateRace,
   getTimerGoalMs,
   // Feature 3: journal
@@ -463,6 +442,18 @@ const CORE = {
   // lesson-only-overlay + lesson-bar-container-anchor: detection
   isLessonScreen, isLessonBar, findLessonBarByAnchor, findBarBySignature,
 };
+
+// Punto de enganche para tests. INERTE salvo que el arnés defina este global
+// ANTES de inyectar el script: en un userscript manager nunca se define, asi que
+// la rama no se ejecuta y el archivo se comporta igual que sin esta linea. Es lo
+// que permite testear ESTE archivo (el que se instala) sin mantener una copia
+// "dev" que se desincroniza. Vive a nivel de modulo, junto a CORE, y no dentro
+// del IIFE browser-only: el arnés evalua el script sin window/document, asi que
+// el guard de navegador no corre y este enganche tiene que ser alcanzable.
+// Ver openspec/changes/test-published-file-ci/design.md (decision 1).
+if (typeof globalThis !== 'undefined' && globalThis.__ADHD_TEST__) {
+  globalThis.__ADHD_TEST__(CORE);
+}
 
 // ---------- Lesson bar detection signature (lesson-only-overlay) ----------
 // Validated against real DOM captures (pb-spy-2026-09-16 (1).json, 136 events):
@@ -950,7 +941,7 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
     let journal = null;           // diario local (cargado bajo demanda)
     let lessonStartTs = 0;        // timestamp de inicio de lección
     // arena-timer-overhaul: estado del rediseño del timer
-    let decayEl = null;           // timeline de decaimiento (6 bandas + playhead)
+    let decayEl = null;           // timeline de decaimiento (riel continuo por vueltas)
     let lastProjectedRung = null; // rung proyectado del tramo activo (para detectar caída)
     let activeParts = 0;          // nodos de partículas vivos (cap 44)
     const REDUCED_MOTION = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -1200,10 +1191,6 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
         clip-path: polygon(50% 0,62% 38%,100% 50%,62% 62%,50% 100%,38% 62%,0 50%,38% 38%);
         animation: adhd-sparkle 2200ms ease-in-out infinite;
       }
-      .adhd-rung-perdido {
-        background: repeating-linear-gradient(45deg, #afafaf 0 4px, #9a9a9a 4px 8px);
-      }
-
       /* tramo-fx-round2 (D1): loops de vida en peldaños bajos — SOLO tramo activo
          (el registro congelado no parpadea). Reutilizan adhd-sweep2, sin keyframes
          ni nodos nuevos. Opacidades calibradas +50% sobre el design (Mori no veía
@@ -1240,13 +1227,12 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
       @keyframes adhd-loss-flash { 0% { opacity:.85; } 100% { opacity:0; } }
       @keyframes adhd-blink-hard { 0%,49% { opacity:1; } 50%,100% { opacity:.3; } }
 
-      /* flash de pérdida: overlay remonteado por caída (nunca interrumpe width) */
+      /* flash de escalón: overlay remonteado por caída (nunca interrumpe width) */
       .adhd-seg.adhd-blink-hard { animation: adhd-blink-hard 420ms steps(1) infinite; }
       .adhd-loss-flash {
         position:absolute; inset:0; border-radius:9999px; pointer-events:none;
         background:#ff4b4b; animation: adhd-loss-flash 180ms linear forwards;
       }
-      .adhd-loss-flash.perdido { animation-duration: 240ms; }
 
       /* tramo-fx-round2 (D2): capa del peldaño anterior que fadea al degradar.
          Lleva la clase del rung previo → hereda su skin (selectores .adhd-rung-*). */
@@ -1335,6 +1321,11 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
       @keyframes adhd-rail-sweep { 0% { background-position:180% 0; } 100% { background-position:-80% 0; } }
       body.adhd-dark .adhd-rail-head { box-shadow:0 0 0 1.5px rgba(0,0,0,.75); }
       .adhd-rail-head.urgent { background:#ff4b4b; box-shadow:0 0 0 1.5px rgba(120,0,0,.8); }
+      /* rail-deck-ratchet: wrap. El riel se recarga; el filo de la cabeza hace
+         una sola pasada de barrido (mismo lenguaje que el sweep permanente).
+         No hay nodo nuevo: se reinicia la animacion del sweep existente. */
+      @keyframes adhd-rail-wrap { 0% { opacity: 1; } 100% { opacity: .25; } }
+      .adhd-rail-head.adhd-rail-wrap { animation: adhd-rail-wrap 560ms ease-out; }
 
       /* etiqueta de texto del peldaño proyectado: legible sin hover */
       .adhd-rail-label {
@@ -1358,6 +1349,14 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
       .adhd-digit-sep { display:inline-block; width:.34em; text-align:center; opacity:.55; }
       .adhd-mini-crono.urgent { background: rgba(180,30,30,.55); }
       .adhd-mini-crono .adhd-hourglass { font-size: 14px; vertical-align: 2px; margin-right: 2px; }
+      /* rail-deck-ratchet: marcador de vuelta. Secondary al digito (el
+         cronometro sigue siendo el resto de la vuelta en curso), asi que va
+         atenuado y sin tabular. */
+      .adhd-mini-crono .adhd-lap-mark {
+        font-size: 12px; font-weight: 700; line-height: 1; opacity: .7;
+        margin-left: 4px; vertical-align: 1px;
+      }
+      .adhd-mini-crono .adhd-lap-mark.spent { opacity: .95; }
 
       /* tramo-fx-round2: CSS de combat text eliminado (ver spec tramo-celebrations) */
 
@@ -1396,7 +1395,7 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
         .adhd-rung-racha, .adhd-rung-diamante, .adhd-rung-super,
         .adhd-rung-racha .adhd-ember, .adhd-rung-diamante .adhd-sparkle,
         .adhd-rung-super .adhd-sparkle, .adhd-shine, .adhd-loss-flash,
-        .adhd-rail-head::after, .adhd-rail-head.urgent, .adhd-part2, .adhd-ring, .adhd-seg.adhd-blink,
+        .adhd-rail-head::after, .adhd-rail-head.urgent, .adhd-rail-head.adhd-rail-wrap, .adhd-part2, .adhd-ring, .adhd-seg.adhd-blink,
         .adhd-seg.adhd-legendary,
         .adhd-rung-prev, .adhd-halo,
         .adhd-seg.adhd-active.adhd-rung-madera::before,
@@ -1552,19 +1551,46 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
         });
       }
 
+      // rail-fixed-lap-ceiling: marcador de VUELTA. Reusa el cronometro (sin
+      // nodos nuevos en el riel): ⟳N desde la segunda vuelta. Se actualiza
+      // aparte de renderDigits porque los digitos se saltan frames y el wrap
+      // tiene que verse siempre.
+      let lapMark = null;
+      function renderLapMarker(lap) {
+        if (lap < 1) {
+          if (lapMark) { lapMark.remove(); lapMark = null; }
+          return;
+        }
+        if (!lapMark) {
+          lapMark = document.createElement('span');
+          lapMark.className = 'adhd-lap-mark';
+          miniCronoEl.appendChild(lapMark);
+        }
+        const text = '⟳' + (lap + 1);
+        if (lapMark.textContent !== text) lapMark.textContent = text;
+      }
+
       // arena-timer-overhaul: proyección por TIEMPO PURO quemado (no por ritmo).
+      // rail-fixed-lap-ceiling: contra la escalera en play (vueltas), sin bandas.
       function tick() {
         if (!miniCronoEl || !raceStartTime) return;
         const elapsed = Date.now() - raceStartTime;
-        const frac = elapsed / goalMs;
-        renderDigits(Math.max(0, goalMs - elapsed));
+        const L = currentLadder(elapsed);
+        if (!L) return;
+        const projected = L.tier;
+        const frac = L.frac;
+        // Restante de la VUELTA en curso (se resetea en cada recarga).
+        renderDigits(Math.max(0, goalMs - (elapsed % goalMs)));
+        renderLapMarker(L.lap);
 
-        const projected = rungAt(currentBands(), frac);
-        const R = projected === -1 ? LOST : RUNGS[projected];
-        miniCronoEl.style.color = R.to;
+        const R = RUNGS[projected];
+        // Extremo OSCURO del gradiente: R.to es casi blanco en diamante/plata y
+        // el cronometro vive sobre el fondo claro de la leccion (ilegible).
+        miniCronoEl.style.color = R.from;
 
-        // Urgencia >80%: blink hard + ⌛ (nunca sólo color)
-        const urgent = frac > 0.8 && frac < 1;
+        // Urgencia >80% de la vuelta: blink hard + ⌛ (nunca sólo color). Avisa de
+        // que estás por perder el peldaño de la vuelta, el único costo intra-vuelta.
+        const urgent = frac > 0.8;
         miniCronoEl.classList.toggle('urgent', urgent);
         if (urgent && !miniCronoEl.querySelector('.adhd-hourglass')) {
           const hg = document.createElement('span');
@@ -1576,7 +1602,7 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
           if (hg) hg.remove();
         }
 
-        updateDecayTimeline(frac);
+        updateDecayTimeline(L);
         // decay-timeline-visibility: red de seguridad a 100ms para layout shifts
         // que no disparan scroll/resize/mutación (p.ej. transform en el header).
         if (decayEl && timelineNeedsReanchor()) positionDecayTimeline();
@@ -1609,6 +1635,10 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
     function restartRace(now) {
       raceStartTime = now;
       lastProjectedRung = null;
+      // rail-deck-ratchet: el lap se deriva de raceStartTime, asi que la escalera
+      // vuelve a la vuelta 1 sola. Se limpia la firma para que el reinicio de
+      // tramo no dispare el sweep de wrap (no hubo wrap: arranco otra carrera).
+      lastRailLap = -1;
       stopMiniCrono();
       startMiniCrono();
     }
@@ -1632,18 +1662,29 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
     // se retiró en tramo-fx-round2; ver la nota de eliminación más abajo).
     // =====================================================================
 
+    // rail-deck-ratchet: firmas de la escalera en play y de la vuelta del riel.
+    // Se resetean al (re)construir el timeline para que el marco de referencia se
+    // repinte aunque la escalera sea la misma.
+    let lastLadderKey = '';
+    let lastRailLap = -1;
+
     // Geometría del riel. GAP = aire entre barra y riel. H = alto total del
     // chrome (20px riel + 2px padding*2 + 2px borde*2); fallback si el
     // elemento todavía no se midió. Espejo de --adhd-rail-h en el CSS.
     const ADHD_TIMELINE_GAP = 8;
     const ADHD_TIMELINE_H  = 28;
 
-    function currentBands() { return bandsFor((cfg.timerHardness || 0) / 100); }
+    // rail-fixed-lap-ceiling: la escalera en play para una carrera de `elapsed` ms.
+    // Una sola fuente de verdad: riel, cronometro, preview del tramo y el cierre
+    // del tramo evalúan TODOS contra este objeto, asi que no pueden discrepar.
+    function currentLadder(elapsedMs) {
+      return ladderAt(elapsedMs, getTimerGoalMs(cfg));
+    }
 
-    // Rótulo localizado del peldaño para la etiqueta del riel. -1 = Perdido.
+    // Rótulo localizado del peldaño para la etiqueta del riel.
     const RAIL_LABEL_KEYS = ['railMadera','railBronce','railPlata','railRacha','railDiamante','railSuper'];
     function railLabelFor(rung) {
-      return rung === -1 ? tr(cfg.lang, 'railPerdido') : tr(cfg.lang, RAIL_LABEL_KEYS[rung]);
+      return tr(cfg.lang, RAIL_LABEL_KEYS[rung]);
     }
 
     // redesign-decay-timeline: RIEL CONTINUO. El presupuesto se consume de
@@ -1655,14 +1696,12 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
     // vez por carrera (ensureDecayTimeline) y sobrevive a los cambios de tramo.
     function buildDecayTimeline() {
       removeDecayTimeline();
-      const bands = currentBands();
       const goalMs = getTimerGoalMs(cfg);
       decayEl = document.createElement('div');
       decayEl.className = 'adhd-decay-timeline';
       decayEl.setAttribute('aria-hidden', 'true');
-      // Firma de las bandas con las que se construyo: si cambia la dureza,
-      // ensureDecayTimeline() sabe que debe reconstruir.
-      decayEl.dataset.bands = bands.map(b => b.toFixed(4)).join(',');
+      // Firma de construccion: si cambia el objetivo, ensureDecayTimeline() sabe
+      // que debe reconstruir.
       decayEl.dataset.goal = String(goalMs);
 
       const track = document.createElement('div');
@@ -1688,38 +1727,22 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
       track.appendChild(label);
       decayEl.appendChild(track);
 
-      // Tooltip: la escalera completa con segundos (referencia de dureza).
-      const edges = bandEdges(bands);
-      track.title = edges.map((e, i) => RUNGS[i].glyph + ' ' + RUNGS[i].label + ' ' +
-        Math.round(e * goalMs / 1000) + 's').join('  \u00b7  ');
-
-      // Muescas: un stop duro por frontera de peldaño (la escalera como referencia).
-      const notchStops = [];
-      edges.forEach((e, i) => {
-        if (i === 0) return; // el borde izquierdo es el piso de la escalera
-        const pct = (e * 100).toFixed(3) + '%';
-        // transparente justo antes -> salto duro -> 1px de muesca -> transparente
-        notchStops.push('rgba(255,255,255,0) ' + pct);
-        notchStops.push('rgba(0,0,0,.30) ' + pct, 'rgba(0,0,0,.30) calc(' + pct + ' + 1px)');
-        notchStops.push('rgba(255,255,255,0) calc(' + pct + ' + 1px)');
-      });
-      decayEl.style.setProperty('--adhd-notches',
-        notchStops.length ? 'linear-gradient(90deg,' + notchStops.join(',') + ')' : 'none');
+      // Referencia de la escalera que se esta bajando (se repinta por vuelta).
+      paintDescent(ladderAt(0, goalMs), goalMs);
 
       document.body.appendChild(decayEl);
       attachTimelineSync();
       positionDecayTimeline();
-      updateDecayTimeline(0);
+      updateDecayTimeline(ladderAt(0, goalMs));
     }
 
     // decay-timeline-visibility (D1): crea el timeline solo si falta, si su firma
-    // de bandas quedó vieja (dureza cambió) o si perdió el nodo de la barra.
+    // quedó vieja (cambió el objetivo) o si perdió el nodo de la barra.
     // El chequeo `!bar.isConnected` cubre el re-render SPA: el nodo viejo queda
     // desconectado aunque la variable `bar` (cacheada) aún lo apunte.
     function ensureDecayTimeline() {
-      const bands = currentBands();
-      const sig = bands.map(b => b.toFixed(4)).join(',');
-      if (decayEl && decayEl.isConnected && decayEl.dataset.bands === sig && bar && bar.isConnected) {
+      const sig = String(getTimerGoalMs(cfg));
+      if (decayEl && decayEl.isConnected && decayEl.dataset.goal === sig && bar && bar.isConnected) {
         positionDecayTimeline();
         return;
       }
@@ -1764,6 +1787,8 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
     function removeDecayTimeline() {
       if (decayEl) { decayEl.remove(); decayEl = null; }
       lastTlAnchor = { left: -1, top: -1, width: -1 };
+      lastLadderKey = '';
+      lastRailLap = -1;
       detachTimelineSync();
     }
 
@@ -1806,18 +1831,49 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
       if (timelineBarObserver) { timelineBarObserver.disconnect(); timelineBarObserver = null; }
     }
 
-    // redesign-decay-timeline: riel continuo. frac = presupuesto quemado.
-    // - el fill RESTANTE se encoge desde la derecha y lleva el material del
-    //   peldaño PROYECTADO (a donde caes si seguis asi);
+    // rail-fixed-lap-ceiling: la referencia ya no son muescas de banda (no hay
+    // bandas) sino el DESCENSO: en que vuelta estoy y que peldaño trae cada
+    // vuelta siguiente. Idempotente por firma: solo escribe al cambiar de vuelta.
+    // El piso es Madera, asi que la lista termina y no se agota nunca.
+    function paintDescent(L, goalMs) {
+      if (!decayEl) return;
+      const key = String(L.lap) + '|' + String(goalMs);
+      if (key === lastLadderKey) return;
+      lastLadderKey = key;
+      const track = decayEl.querySelector('.adhd-rail-track');
+      if (!track) return;
+
+      // RUNGS es ASCENDENTE (0 = madera ... 5 = super), así que el descenso se
+      // arma desde el peldaño en play hacia abajo, no desde el índice de vuelta.
+      const steps = [];
+      for (let i = L.tier; i >= 0; i--) {
+        const R = RUNGS[i];
+        steps.push((i === L.tier ? '\u25B6 ' : '') + R.glyph + ' ' + R.label +
+                   (i === L.tier ? ' (vuelta ' + (L.lap + 1) + ')' : ''));
+      }
+      track.title = steps.join('  \u00b7  ');
+
+      // Sin marco en el track: el material del fill, la etiqueta y esta
+      // referencia son la escalera completa. Se limpia cualquier gradiente de
+      // una versión anterior del script.
+      decayEl.style.setProperty('--adhd-notches', 'none');
+    }
+
+    // redesign-decay-timeline: riel continuo. L = escalera en play (ladderAt).
+    // - el fill RESTANTE se encoge desde la derecha con el material del
+    //   peldaño de la vuelta (constante durante toda la vuelta);
     // - el earned GANADO crece desde la izquierda con el peldaño LOGRADO;
     // - la cabeza marca la frontera con un filo duro + sweep (direccion);
-    // - la etiqueta dice el peldaño proyectado en texto legible (no formas).
-    function updateDecayTimeline(frac) {
-      if (!decayEl) return;
-      const bands = currentBands();
-      const projected = rungAt(bands, frac);
-      const lost = projected === -1;
-      const pct = Math.max(0, Math.min(1, frac));
+    // - la etiqueta dice el peldaño en texto legible (no formas).
+    // rail-fixed-lap-ceiling: todo se mide contra la fraccion LOCAL de la vuelta,
+    // asi el riel se recarga al 100% en vez de quedar clavado.
+    function updateDecayTimeline(L) {
+      if (!decayEl || !L) return;
+      const projected = L.tier;
+      const R = RUNGS[projected];
+      const pct = Math.max(0, Math.min(1, L.frac));
+
+      paintDescent(L, getTimerGoalMs(cfg));
 
       const fill = decayEl.querySelector('.adhd-rail-fill');
       const earned = decayEl.querySelector('.adhd-rail-earned');
@@ -1826,11 +1882,9 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
 
       if (fill) {
         fill.style.width = ((1 - pct) * 100) + '%';
-        // Material del peldaño proyectado = el estado, no decoracion.
-        const R = lost ? LOST : RUNGS[projected];
+        // Material del peldaño de la vuelta = el estado, no decoracion.
         fill.style.setProperty('--adhd-fill',
           'linear-gradient(180deg,' + R.to + ' 0%,' + R.from + ' 100%)');
-        fill.style.opacity = lost ? '.55' : '1';
       }
 
       if (earned) {
@@ -1839,7 +1893,7 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
         // hasta entonces queda neutro (el earned es "presupuesto ya quemado").
         earned.style.width = (pct * 100) + '%';
         const done = currentSegRungEarned();
-        const RE = done === null ? null : (done === -1 ? LOST : RUNGS[done]);
+        const RE = done === null ? null : RUNGS[done];
         earned.style.setProperty('--adhd-earned', RE
           ? 'linear-gradient(180deg,' + RE.to + ' 0%,' + RE.from + ' 100%)'
           : 'linear-gradient(180deg,#e4e7e9 0%,#b8bfc4 100%)');
@@ -1847,7 +1901,9 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
 
       if (head) {
         head.style.left = (pct * 100) + '%';
-        head.classList.toggle('urgent', !lost && frac > 0.8);
+        // 2.4: la urgencia ya no avisa de una frontera de banda (no hay bandas):
+        // avisa de que estás por perder el peldaño de la vuelta. Mismo umbral.
+        head.classList.toggle('urgent', L.frac > 0.8);
       }
 
       if (label) {
@@ -1863,10 +1919,28 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
       }
 
       if (decayEl) {
-        const R = lost ? LOST : RUNGS[projected];
         decayEl.dataset.rung = String(projected);
+        decayEl.dataset.lap = String(L.lap);
         decayEl.title = R.glyph + ' ' + R.label + ' \u00b7 ' + Math.round(pct * 100) + '% quemado';
       }
+
+      // Wrap: una sola pasada del sweep de la cabeza, sin nodos nuevos. El
+      // reflow reinicia la animacion; el fill (120ms) + material (320ms) hacen
+      // el rebobinado visual.
+      if (L.lap !== lastRailLap) {
+        if (lastRailLap >= 0) restartHeadSweep();
+        lastRailLap = L.lap;
+      }
+    }
+
+    // rail-deck-ratchet: reinicio one-shot del sweep de la cabeza (marca de wrap).
+    function restartHeadSweep() {
+      const head = decayEl && decayEl.querySelector('.adhd-rail-head');
+      if (!head) return;
+      head.classList.remove('adhd-rail-wrap');
+      void head.offsetWidth;          // reflow: rearma la animacion
+      head.classList.add('adhd-rail-wrap');
+      setTimeout(() => head.classList.remove('adhd-rail-wrap'), 600);
     }
 
     // Rung ya cerrado en ESTE tramo (para pintar el earned con su material).
@@ -1914,7 +1988,7 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
     function playRewardFx(rung) {
       if (!cfg.timerShowLabel) return;          // interruptor del panel
       const name = FX_BY_RUNG[rung];
-      if (!name) return;                          // peldanos bajos / perdido: sin FX
+      if (!name) return;                          // peldaños bajos: sin FX
       const now = Date.now();
       if (now - (fxLastFire[name] || 0) < FX_MIN_GAP_MS) return;
       fxLastFire[name] = now;
@@ -2110,7 +2184,7 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
     }
 
     // Skin del tramo activo = rung proyectado. Caída de peldaño → flash de pérdida.
-    const RUNG_CLASSES = RUNGS.map(r => 'adhd-rung-' + r.id).concat(['adhd-rung-perdido']);
+    const RUNG_CLASSES = RUNGS.map(r => 'adhd-rung-' + r.id);
 
     // tramo-fx-round2 (D2): CSS no interpola background-image — al cambiar de
     // peldaño, el skin ANTERIOR vive 320ms encima y fadea (degradado real, no
@@ -2131,8 +2205,10 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
         segEl.classList.remove('adhd-rarity-verde', 'adhd-blink', ...RUNG_CLASSES);
         segEl.classList.add(cls);
         if (prevCls && prevCls !== cls) crossFadeRung(segEl, prevCls);
+        // Bajar de peldaño dentro del mismo tramo (la vuelta se recargó) es un
+        // escalón, no una pérdida: solo el crossfade de skin lo marca.
         if (lastProjectedRung !== null && projected < lastProjectedRung) {
-          flashLoss(segEl, projected === -1);
+          flashLoss(segEl);
         }
         lastProjectedRung = projected;
         // 6.4 feedback: las decoraciones vivas (embers/sparkles) también viven en el
@@ -2145,13 +2221,15 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
       segEl.classList.toggle('adhd-blink-hard', frac > 0.8 && frac < 1);
     }
 
-    function flashLoss(segEl, isPerdido) {
+    // rail-fixed-lap-ceiling: ya no hay flash de PÉRDIDA (no hay derrota). Este
+    // marca un escalón a la baja dentro del tramo, cuando una vuelta se recarga.
+    function flashLoss(segEl) {
       if (segEl.querySelector('.adhd-loss-flash')) return; // máx 1 flash vivo
       const f = document.createElement('span');
-      f.className = 'adhd-loss-flash' + (isPerdido ? ' perdido' : '');
+      f.className = 'adhd-loss-flash';
       f.setAttribute('aria-hidden', 'true');
       segEl.appendChild(f);
-      setTimeout(() => f.remove(), isPerdido ? 300 : 220);
+      setTimeout(() => f.remove(), 220);
     }
 
     // Decoraciones vivas del rung congelado: ascuas (racha) y destellos (diamante/super).
@@ -2194,7 +2272,7 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
       if (edge) edge.style.opacity = (parseFloat(segEl.style.width) > 1) ? '1' : '0';
 
       // sliding shine: SOLO tramo activo, off en racha/super (compite con flicker/gradiente)
-      const wantShine = projected !== 3 && projected !== 5 && projected !== -1;
+      const wantShine = projected !== 3 && projected !== 5;
       if (wantShine && !segEl.querySelector('.adhd-shine-wrap')) {
         const wrap = document.createElement('span');
         wrap.className = 'adhd-shine-wrap';
@@ -2340,10 +2418,13 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
           // a 100ms; acá lo aplicamos también para que el primer frame no quede vacío).
           const done = segDone / segLen;
           if (raceStartTime > 0) {
-            const frac = (Date.now() - raceStartTime) / getTimerGoalMs(cfg);
-            const projected = rungAt(currentBands(), frac);
-            applyProjectedRung(seg, projected, frac);
-            ensureActiveFx(seg, projected);
+            // rail-fixed-lap-ceiling: misma escalera en play que el riel (una sola
+            // fuente de verdad), asi el preview del tramo nunca contradice al riel.
+            const L = currentLadder(Date.now() - raceStartTime);
+            if (L) {
+              applyProjectedRung(seg, L.tier, L.frac);
+              ensureActiveFx(seg, L.tier);
+            }
           } else {
             seg.classList.remove('adhd-blink', 'adhd-blink-hard');
             seg.style.opacity = String(0.6 + 0.4 * done);
@@ -2376,9 +2457,9 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
             saveTimes(raceTimes);
 
             // Evaluar velocidad → rung final del tramo (arena-timer-overhaul: bandas + dureza)
-            const result = evaluateRace(raceMs, goalMs, (cfg.timerHardness || 0) / 100);
+            const result = evaluateRace(raceMs, goalMs);
             if (result) {
-              // Guardar rung final (número; -1 = perdido; 0 = madera — ¡no es falsy check!)
+              // Guardar rung final (número; 0 = madera — ¡no es falsy check!)
               completedRarities[tramoIdx] = result.rung;
 
               // Congelar el tramo con el skin del rung ganado (registro).
@@ -2390,11 +2471,11 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
                 segEl.style.opacity = '1';
                 clearActiveFx(segEl);
                 addRungDecorations(segEl, result.rung);
-                if (result.lost) flashLoss(segEl, true);
               }
 
-              // Partículas escaladas (perdido: sin burst — trama + flash hablan solos)
-              if (!result.lost) {
+              // Partículas escaladas + reward fx: siempre hay peldaño (el piso es
+              // Madera), asi que nunca hay un cierre "sin premio".
+              {
                 const stagger = (h - lastHitCount) * 250;
                 setTimeout(() => burstRung(result.rung, xAt, false), stagger);
                 if (result.rung === 5) setTimeout(fireHalo, stagger); // corona con halo
@@ -2437,7 +2518,7 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
         if (cfg.timerMode && raceStartTime > 0) {
           const raceMs = Date.now() - raceStartTime;
           const goalMs = getTimerGoalMs(cfg);
-          const result = evaluateRace(raceMs, goalMs, (cfg.timerHardness || 0) / 100);
+          const result = evaluateRace(raceMs, goalMs);
           if (result) {
             lastRung = result.rung;
             completedRarities[lastSegIdx] = result.rung;
@@ -2449,9 +2530,8 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
               lastSegEl.style.opacity = '1';
               clearActiveFx(lastSegEl);
               addRungDecorations(lastSegEl, result.rung);
-              if (result.lost) flashLoss(lastSegEl, true);
             }
-            if (!result.lost) {
+            {
               burstRung(result.rung, cx, result.rung === 5); // Super cierra con doble oleada
               if (result.rung === 5) fireHalo();
               // reward-fx-canvas: mismo overlay por jerarquia al cerrar la ultima trama
@@ -2476,7 +2556,12 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
 
     // Ícono de engranaje vectorial (independiente del emoji del SO).
     const GEAR_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>';
+    // settings-btn-global-spa: idempotente. El observer la re-chequea en cada
+    // batch de mutaciones, así que recrear el nodo en cada llamada tiraría el
+    // panel abierto y el foco del teclado. Solo se reconstruye si el nodo
+    // realmente no está en el documento.
     function injectSettingsBtn() {
+      if (settingsBtn && settingsBtn.isConnected) return;
       if (settingsBtn) settingsBtn.remove();
       settingsBtn = document.createElement('div');
       settingsBtn.className = 'adhd-btn';
@@ -2527,8 +2612,6 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
             <input type="range" id="adhd-timer-min" min="1" max="30" value="${cfg.timerMinutes}">
             <label for="adhd-timer-sec">+ <span class="adhd-val" id="adhd-timer-sec-val">${cfg.timerSeconds}s</span></label>
             <input type="range" id="adhd-timer-sec" min="0" max="59" step="5" value="${cfg.timerSeconds}">
-            <label for="adhd-timer-hardness">${tr(cfg.lang, 'lblTimerHardness')}: <span class="adhd-val" id="adhd-timer-hardness-val">${cfg.timerHardness != null ? cfg.timerHardness : 35}</span>%</label>
-            <input type="range" id="adhd-timer-hardness" min="0" max="100" step="5" value="${cfg.timerHardness != null ? cfg.timerHardness : 35}" aria-label="${tr(cfg.lang, 'lblTimerHardness')}">
             <label><input type="checkbox" id="adhd-timer-label" ${cfg.timerShowLabel ? 'checked' : ''}> ${tr(cfg.lang, 'lblTimerLabel')}</label>
             <button id="adhd-test-fx">${tr(cfg.lang, 'btnTestFx')}</button>
             <div class="adhd-hint">${tr(cfg.lang, 'hintTimerGoal')}</div>
@@ -2601,21 +2684,11 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
       panel.querySelector('#adhd-timer-sec').addEventListener('change', (e) => {
         setCfg('timerSeconds', parseInt(e.target.value, 10));
       });
-      // arena-timer-overhaul: dureza — recalcula bandas y redibuja el timeline en vivo
-      panel.querySelector('#adhd-timer-hardness').addEventListener('input', (e) => {
-        panel.querySelector('#adhd-timer-hardness-val').textContent = e.target.value;
-      });
-      panel.querySelector('#adhd-timer-hardness').addEventListener('change', (e) => {
-        setCfg('timerHardness', parseInt(e.target.value, 10));
-        lastProjectedRung = null; // el decaimiento se re-proyecta con las bandas nuevas
-        // ensureDecayTimeline() detecta la firma de bandas nueva y reconstruye
-        if (cfg.timerMode && raceStartTime > 0) ensureDecayTimeline();
-      });
       panel.querySelector('#adhd-timer-label').addEventListener('change', (e) => {
         setCfg('timerShowLabel', e.target.checked);
       });
 
-      // tramo-fx-round2 (D4): calibración en vivo — cicla los 6 bursts + perdido
+      // tramo-fx-round2 (D4): calibración en vivo — cicla los 6 bursts + un escalón
       // SIN esperar cruces. Spacing 1400ms: el burst vive ~1.2s y el cap 44
       // recién libera, así Super nunca se recorta (design D4, riesgo de apilado).
       // reward-fx-canvas: el mismo botón sirve de vista previa de los overlays.
@@ -2626,15 +2699,15 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
           setTimeout(() => burstRung(r, 50, r === 5), r * 1400);
           setTimeout(() => playRewardFx(r), r * 1400 + 180);
         }
-        setTimeout(() => { // perdido: trama + flash sobre el tramo activo, sin texto
+        setTimeout(() => { // escalón a la baja dentro del tramo: crossfade + flash
           const seg = overlay.querySelector('.adhd-seg.adhd-active') || overlay.querySelector('.adhd-seg');
           if (!seg || seg.querySelector('.adhd-rung-prev')) return;
           const s = document.createElement('span');
-          s.className = 'adhd-rung-prev adhd-rung-perdido';
+          s.className = 'adhd-rung-prev adhd-rung-madera';
           s.setAttribute('aria-hidden', 'true');
           seg.appendChild(s);
           setTimeout(() => s.remove(), 360);
-          flashLoss(seg, true);
+          flashLoss(seg);
         }, 6 * 1400);
       });
 
@@ -2687,6 +2760,11 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
       // rAF solo podía agregar hasta 1 frame de latencia al arranque.
       const mo = new MutationObserver(() => {
         watchPath();
+        // settings-btn-global-spa: el engranaje es de PANTALLA, no de carrera.
+        // Se crea en init() y se recupera acá si el nodo se perdió en un remount
+        // de la SPA, así nunca hace falta recargar. Una lectura booleana por
+        // batch: no agrega timer ni observer nuevo.
+        if (!settingsBtn || !settingsBtn.isConnected) injectSettingsBtn();
         ensureRoots();
         const w = bar ? bar.getBoundingClientRect().width : 0;
         const { value } = getProgress();
@@ -2700,14 +2778,22 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
     }
 
     function init() {
+      // settings-btn-global-spa: el estado persistente y el engranaje NO dependen
+      // de que haya barra de lección. Antes vivían dentro del primer éxito del
+      // sondeo, así que arrancar en /learn y entrar a una lección por SPA dejaba
+      // el diario vacío, el promedio en "—" y el engranaje inexistente hasta
+      // recargar.
+      raceTimes = loadTimes();
+      if (cfg.journalEnabled) journal = getJournal();
+      injectSettingsBtn();
+
+      // El sondeo queda con su única responsabilidad: encontrar la barra y
+      // renderizar. La barra de lección no existe en pantallas que no son
+      // lección, y el engranaje no la espera para aparecer.
       const tryIt = setInterval(() => {
         if (ensureRoots()) {
           clearInterval(tryIt);
-          // Cargar estado persistente
-          raceTimes = loadTimes();
-          if (cfg.journalEnabled) journal = getJournal();
           render();
-          injectSettingsBtn();
         }
       }, 500);
       setTimeout(() => clearInterval(tryIt), 30000);

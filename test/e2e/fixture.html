@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>adhd e2e fixture</title>
+<style>
+  /* Geometria que el detector lee: la barra arriba del todo, ancho plausible. */
+  #lesson { position:absolute; top:0; left:0; right:0; height:40px; }
+  .lesson-header-row { display:flex; align-items:center; gap:12px; height:40px; }
+  .bar { width:600px; height:14px; background:#e5e5e5; border-radius:8px; }
+</style>
+</head>
+<body>
+<!--
+  Fixture minimo: SOLO lo que el script usa para detectar la barra de leccion
+  (boton de salir + barra de progreso hermana en la misma fila). No es una copia
+  del DOM de Duolingo: es el contrato de deteccion. Ver la spec
+  lesson-bar-detection.
+-->
+<div id="lesson">
+  <div class="lesson-header-row">
+    <button data-test="quit-button" type="button">Salir</button>
+    <div class="bar" role="progressbar" aria-valuenow="0.15" aria-valuemax="1" aria-valuemin="0"></div>
+  </div>
+</div>
+
+<script>
+// ---- stubs de la API de userscript manager ----
+// El script se carga como lo haria Tampermonkey: con GM_* disponible. El reloj
+// es controlable para poder recorrer las vueltas del riel sin esperar en real.
+(function () {
+  window.__errors = [];
+  window.addEventListener('error', function (e) {
+    window.__errors.push('ERROR: ' + (e.message || (e.error && e.error.message)));
+  });
+  window.addEventListener('unhandledrejection', function (e) {
+    window.__errors.push('REJECT: ' + e.reason);
+  });
+
+  var store = {};
+  window.GM_addStyle = function (css) {
+    var s = document.createElement('style');
+    s.textContent = css;
+    document.head.appendChild(s);   // si el CSS no parsea, esto LANZA: lo queremos
+    return s;
+  };
+  window.GM_getValue = function (k, d) { return (k in store) ? store[k] : d; };
+  window.GM_setValue = function (k, v) { store[k] = v; };
+  window.GM_info = { script: { version: 'e2e' } };
+  window.GM_registerMenuCommand = function () {};
+
+  // Objetivo corto para que las vueltas pasen durante el check. OJO: el script
+  // hace Object.assign({}, DEFAULTS, stored) — stored tiene que ser un OBJETO.
+  // Si se guarda un string JSON, Object.assign lo esparce por indice y la
+  // config no aplica (el objetivo queda en el default de 10 minutos y ninguna
+  // vuelta recarga nunca).
+  store.adhd_config = { lang: 'es', timerMode: true, timerMinutes: 0, timerSeconds: __GOAL__ };
+
+  // Reloj controlable: __t se avanza desde el reporte.
+  var realNow = Date.now;
+  window.__t = realNow();
+  Date.now = function () { return window.__t; };
+  window.__advance = function (ms) { window.__t += ms; };
+  window.__now = realNow;
+
+  // El enganche de test debe quedar INERTE aca (no hay arnés definido).
+  window.__hookFired = false;
+  window.__ADHD_TEST__ = undefined;
+})();
+</script>
+
+<!-- el archivo publicado, inyectado entero -->
+<script>
+/*__SCRIPT__*/
+</script>
+
+<script>
+// ---- reporte: se escribe en el <pre> y el runner lo parsea del DOM volcado ----
+(function () {
+  function q(s) { return document.querySelector(s); }
+  function tierSamples() {
+    // Muestrea el riel dentro de UNA vuelta: el material y la etiqueta no deben
+    // cambiar hasta que la vuelta se recarga.
+    var out = [];
+    [0, 300, 900, 1800, 2700, 3000].forEach(function (ms) {
+      window.__advance(ms === 0 ? 0 : ms);
+      out.push({
+        label: (q('.adhd-rail-label') || {}).textContent || null,
+        material: getComputedStyle(q('.adhd-rail-fill') || document.body).backgroundImage,
+        fill: (q('.adhd-rail-fill') || {}).style ? q('.adhd-rail-fill').style.width : null,
+      });
+    });
+    return out;
+  }
+  function snap(label) {
+    var fill = q('.adhd-rail-fill');
+    var mark = q('.adhd-lap-mark');
+    return {
+      label: label,
+      lapMark: mark ? parseInt(String(mark.textContent).replace(/[^0-9]/g, ''), 10) : 0,
+      material: fill ? getComputedStyle(fill).backgroundImage : null,
+      lost: !!q('.adhd-rail-fill') && /afafaf|d4d4d4/.test(getComputedStyle(q('.adhd-rail-fill')).backgroundImage),
+    };
+  }
+
+  // OJO: el snapshot se toma DENTRO del setTimeout, no al parsear. Al parsear el
+  // script todavia no corrio (readyState='loading'), asi que el entry point y el
+  // overlay no existen todavia y el reporte saldria vacio.
+  function snapshot() {
+    return {
+      errors: window.__errors,
+      hookFired: window.__hookFired === true,
+      pathname: location.pathname,
+      gear: !!q('.adhd-btn'),
+      overlay: !!q('.adhd-overlay'),
+      segs: document.querySelectorAll('.adhd-seg').length,
+      expectedSegs: 5,
+      activeSeg: document.querySelectorAll('.adhd-seg.adhd-active').length,
+      rail: !!q('.adhd-decay-timeline'),
+      crono: !!q('.adhd-mini-crono'),
+      railLabel: (q('.adhd-rail-label') || {}).textContent || null,
+      railTitle: (q('.adhd-rail-track') || {}).title || null,
+      styleRules: (function () {
+        var st = document.querySelectorAll('style');
+        var n = 0;
+        for (var i = 0; i < st.length; i++) { if (st[i].sheet) n += st[i].sheet.cssRules.length; }
+        return n;
+      })(),
+      laps: [],
+    };
+  }
+
+  // El riel lo repinta el tick de 100ms del script, asi que avanzar el reloj no
+  // basta: hay que dejar correr timers reales entre avance y lectura. Por eso el
+  // recorrido es async y cada muestra espera un tick.
+  function waitTick() { return new Promise(function (r) { setTimeout(r, 150); }); }
+  function step(ms) { window.__advance(ms); return waitTick(); }
+
+  function tierSamples() {
+    var out = [];
+    return [0, 300, 600, 900, 900, 900].reduce(function (chain, ms) {
+      return chain.then(function () { return step(ms); }).then(function () {
+        out.push({
+          label: (q('.adhd-rail-label') || {}).textContent || null,
+          material: q('.adhd-rail-fill')
+            ? getComputedStyle(q('.adhd-rail-fill')).backgroundImage : null,
+        });
+      });
+    }, Promise.resolve()).then(function () { return out; });
+  }
+
+  function snap(lap) {
+    var fill = q('.adhd-rail-fill');
+    var mark = q('.adhd-lap-mark');
+    return {
+      lap: lap,
+      label: (q('.adhd-rail-label') || {}).textContent || null,
+      lapMark: mark ? parseInt(String(mark.textContent).replace(/[^0-9]/g, ''), 10) : 0,
+      material: fill ? getComputedStyle(fill).backgroundImage : null,
+      lost: !!fill && /afafaf|d4d4d4/.test(getComputedStyle(fill).backgroundImage),
+    };
+  }
+
+  setTimeout(function () {
+    report = snapshot();
+    report.barFound = report.overlay;
+    finish();                                   // reporte temprano: el runner ya ve algo
+    if (!report.rail) return;                   // path que no es leccion
+
+    var GOAL = __GOAL__ * 1000;
+    report.goalMs = GOAL;
+
+    tierSamples().then(function (first) {
+      report.laps.push({
+        lap: 0,
+        label: first[0].label,
+        materials: first.map(function (x) { return x.material; }),
+        labels: first.map(function (x) { return x.label; }),
+        lapMark: 0,
+        lost: false,
+        material: first[0].material,
+      });
+      // Cruzamos el limite de vuelta: la etiqueta debe bajar UN peldaño.
+      return step(GOAL).then(function () { report.laps.push(snap(1)); });
+    }).then(function () {
+      // Hasta el piso (6 peldaños) y mas alla: el wrap es infinito, nunca derrota.
+      var chain = Promise.resolve();
+      for (var i = 2; i <= 8; i++) {
+        (function (lap) {
+          chain = chain.then(function () { return step(GOAL); })
+                       .then(function () { report.laps.push(snap(lap)); finish(); });
+        })(i);
+      }
+      return chain;
+    }).then(finish).catch(function (e) {
+      // Nunca dejar al runner sin reporte: si la cadena falla, se dice por que.
+      if (typeof report === 'undefined' || !report) report = snapshot();
+      report.errors = (report.errors || []).concat('CHAIN: ' + (e && e.message || e));
+      finish();
+    });
+  }, 600);
+
+  // Se escribe progresivamente: si la cadena se traba, el runner igual ve hasta
+  // donde llego en vez de "no hay reporte".
+  function finish() {
+    report.errors = window.__errors;
+    report.styleRules = snapshot().styleRules;
+    var old = document.getElementById('adhd-e2e-report');
+    if (old) old.remove();
+    var pre = document.createElement('pre');
+    pre.id = 'adhd-e2e-report';
+    pre.textContent = JSON.stringify(report);
+    document.body.appendChild(pre);
+  }
+})();
+</script>
+</body>
+</html>

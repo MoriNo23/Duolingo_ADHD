@@ -1,0 +1,16 @@
+{
+  "name": "duolingo-adhd",
+  "version": "2.12.0",
+  "private": true,
+  "description": "Tests del userscript Duolingo ADHD. El sujeto de test es el archivo publicado (duolingo-adhd.user.js): no hay copia dev ni build.",
+  "scripts": {
+    "test": "npm run test:core && npm run test:e2e",
+    "test:core": "node --test test/core.test.js",
+    "test:e2e": "node test/e2e/run.js",
+    "mutate": "node mutation-test.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "//": "Sin dependencias a proposito: los tres checks corren con node y un browser ya instalado. El E2E usa el Chrome/Chromium del sistema o la variable CHROME_BIN; falla ruidosamente si no hay ninguno, nunca en verde por omision."
+}

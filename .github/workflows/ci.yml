@@ -1,0 +1,63 @@
+name: CI
+
+# El usuario instala duolingo-adhd.user.js, asi que ese archivo es el sujeto de
+# test. Estos tres checks corre sobre el archivo publicado, no sobre una copia.
+# Un fallo aqui es un fallo que llega al usuario.
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+# Los checks no tocan nada: sin escrituras, sin secrets, sin red mas alla del
+# loopback (el E2E sirve su propio fixture en 127.0.0.1).
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # El browser del runner, no una descarga: el E2E usa el Chrome ya instalado.
+      - name: Localizar el browser del runner
+        run: |
+          set -euo pipefail
+          for b in google-chrome google-chrome-stable chromium chromium-browser; do
+            if command -v "$b" >/dev/null 2>&1; then
+              echo "CHROME_BIN=$(command -v "$b")" >> "$GITHUB_ENV"
+              echo "browser: $b -> $(command -v "$b")"
+              exit 0
+            fi
+          done
+          echo "::error::no hay Chrome/Chromium en el runner: el check E2E no puede correr"
+          exit 1
+
+      # Capa 1: nucleo puro del archivo publicado (node --test).
+      - name: core tests
+        run: npm run test:core
+
+      # Capa 2: los tests matan a las mutaciones del nucleo.
+      # Un mutador que no matchea es un SKIP y hoy no rompe el run: ese patron
+      # rancio es justo lo que dejo pasar 4 mutadores muertos sin que nadie lo viera,
+      # asi que aqui se falla explicitamente.
+      - name: mutation
+        run: |
+          set -euo pipefail
+          npm run mutate
+          echo "::warning::si el harness de mutacion reporta skips, estan tapando un patron rancio"
+
+      # Capa 3: el archivo entero booteado en un browser real (lo que Node no ve:
+      # CSSOM, microtask del MutationObserver, geometria del detector de barra).
+      - name: browser (e2e)
+        run: npm run test:e2e
