@@ -54,7 +54,15 @@
   // Si se guarda un string JSON, Object.assign lo esparce por indice y la
   // config no aplica (el objetivo queda en el default de 10 minutos y ninguna
   // vuelta recarga nunca).
-  store.adhd_config = { lang: 'es', timerMode: true, timerMinutes: 0, timerSeconds: __GOAL__ };
+  // animations-panel-setting: el nivel sembrado depende de la ruta, para que las
+  // dos corridas del check cubran los dos lados del override Y el caso sin
+  // barra de leccion.
+  //   /lesson/         -> 'always' : el body NO lleva adhd-motion-off
+  //   /not-a-lesson/.. -> 'never'  : el body SI lo lleva, sin overlay ni riel
+  // OJO: esto vive en la PRIMERA IIFE (los stubs de GM), asi que el snapshot,
+  // que esta en la segunda, no lo ve. Va por window.
+  window.__motionSeeded = location.pathname.indexOf('not-a-lesson') === -1 ? 'always' : 'never';
+  store.adhd_config = { lang: 'es', timerMode: true, timerMinutes: 0, timerSeconds: __GOAL__, motionLevel: window.__motionSeeded };
 
   // Reloj controlable: __t se avanza desde el reporte.
   var realNow = Date.now;
@@ -119,6 +127,11 @@
       rail: !!q('.adhd-decay-timeline'),
       crono: !!q('.adhd-mini-crono'),
       railLabel: (q('.adhd-rail-label') || {}).textContent || null,
+      // animations-panel-setting: resultado observable del nivel sembrado. El
+      // control del panel se prueba en el core contra el fuente publicado; aca
+      // se prueba el efecto real sobre <body>, que es lo que se ve.
+      motionSeeded: window.__motionSeeded,
+      motionOffClass: document.body.classList.contains('adhd-motion-off'),
       railTitle: (q('.adhd-rail-track') || {}).title || null,
       styleRules: (function () {
         var st = document.querySelectorAll('style');

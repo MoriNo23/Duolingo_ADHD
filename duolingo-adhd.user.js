@@ -2,7 +2,7 @@
 // @name           Duolingo ADHD — Progress bar milestones (for the easily distracted / bored)
 // @name:es        Duolingo ADHD — Hitos de barra de progreso (para los que se aburren / se distraen)
 // @namespace      https://github.com/MoriNo23/duolingo-adhd
-// @version        2.13.0
+// @version        2.14.0
 // @description    Divide la barra de progreso de la lección en tramos. Modo tiempo: cada TRAMO arranca en el techo (Super) y cada vez que el riel se agota se recarga un peldaño más abajo (Super→Madera) — el peldaño de la vuelta en la que cierres el tramo es el que queda congelado. Cerrá rápido para congelar mejor jerarquía. Efectos de recompensa a pantalla completa en los peldaños altos (Racha/Diamante/Super), partículas, cronómetro Baloo 2, diario local + panel EN/ES. Mantiene el diseño nativo de Duolingo.
 // @description:en Splits the lesson progress bar into segments. Timer mode: every segment starts at the top tier (Super) and each time the rail runs out it recharges one tier lower (Super→Wood) — the tier of the lap you close the segment on is the one that gets frozen. Close fast to freeze a better tier. Full-screen reward effects on the high tiers (Streak/Diamond/Super), particles, Baloo 2 clock, local journal + EN/ES settings. Keeps Duolingo's native design.
 // @description:es Divide la barra de progreso de la lección en tramos. Modo tiempo: cada tramo arranca en el nivel Super y va bajando de peldaño (Madera→Super) mientras se quema el presupuesto — cerrá rápido para congelar mejor jerarquía. Efectos de recompensa a pantalla completa en los peldaños altos (Racha/Diamante/Super), partículas, cronómetro Baloo 2, diario local + panel EN/ES. Mantiene el diseño nativo de Duolingo.
@@ -82,6 +82,10 @@ const DEFAULTS = {
   timerMinutes: 10,       // minutos por tramo (1–30)
   timerSeconds: 0,        // segundos adicionales (0–59)
   timerShowLabel: true,   // efectos de recompensa al cerrar tramo (racha+)
+  // animations-panel-setting: nivel de animacion del script.
+  // 'system' = respetar prefers-reduced-motion (default: no cambia nada para
+  // quien ya tenia el config guardado). 'always'/'never' = override explicito.
+  motionLevel: 'system',
   // rail-fixed-lap-ceiling: la clave `timerHardness` ya no se lee ni se escribe.
   // Sigue en DEFAULTS para que los cfgs guardados sigan cargando sin romper.
   timerHardness: 35,
@@ -130,6 +134,12 @@ const I18N = {
     jrStreak:        'Racha (días)',
     jrTotal:         'Lecciones totales',
     jrNoData:        'Sin datos — activa el diario',
+    // animations-panel-setting: nivel de animacion
+    lblMotion:       'Animaciones',
+    hintMotion:      'Respeta la preferencia del sistema salvo que la cambies acá. Afecta solo a este script; no toca la configuracion del escritorio.',
+    motionSystem:    'Respetar sistema',
+    motionAlways:    'Siempre',
+    motionNever:     'Nunca',
   },
   en: {
     panelTitle:      'Progress bar segments (ADHD)',
@@ -165,6 +175,12 @@ const I18N = {
     jrStreak:        'Streak (days)',
     jrTotal:         'Total lessons',
     jrNoData:        'No data — enable journal',
+    // animations-panel-setting: motion level
+    lblMotion:       'Animations',
+    hintMotion:      'Follows the system preference unless you change it here. Affects this script only; it does not change your desktop settings.',
+    motionSystem:    'Respect system',
+    motionAlways:    'Always',
+    motionNever:     'Never',
   },
 };
 function tr(lang, key) { return (I18N[lang] && I18N[lang][key]) || I18N.es[key]; }
@@ -290,6 +306,21 @@ function rungTextColor(rungIdx) {
 }
 
 const STORAGE_KEY_TIMES = 'adhd_timer_times'; // array de tiempos por carrera (ms)
+
+// animations-panel-setting: resuelve si el script apaga sus animaciones.
+//   'never'  -> apagadas siempre (override explícito del usuario)
+//   'always' -> encendidas siempre (override explícito del usuario)
+//   'system' -> lo que diga prefers-reduced-motion
+// Un valor desconocido (config vieja, escrito a mano, corrupto) cae en
+// 'system', que es el default y la única opción que no cambia el behavior
+// previo. Puro a propósito: la precedencia se testea sin DOM.
+function resolveMotion(level, systemReduced) {
+  if (level === 'never') return true;
+  if (level === 'always') return false;
+  return !!systemReduced;
+}
+
+const MOTION_LEVELS = ['system', 'always', 'never'];
 
 function getTimerGoalMs(cfg) {
   return (cfg.timerMinutes * 60 + cfg.timerSeconds) * 1000;
@@ -436,6 +467,8 @@ const CORE = {
   RUNGS, tierForLap, ladderAt, rungClass, rungTextColor,
   loadTimes, saveTimes, getAverage, resetTimes, newRaces, evaluateRace,
   getTimerGoalMs,
+  // animations-panel-setting: resolucion de la preferencia de animacion
+  resolveMotion, MOTION_LEVELS,
   // Feature 3: journal
   loadJournal, saveJournal, todayKey, initJournal, getJournal,
   recordLesson, recordSeparators, recordRaceTime, resetJournal,
@@ -1390,21 +1423,39 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
         100% { box-shadow:0 0 28px 12px rgba(167,139,250,0); }
       }
 
-      /* ===== reduced-motion: kill switch (la info nunca depende de la animación) ===== */
-      @media (prefers-reduced-motion: reduce) {
-        .adhd-rung-racha, .adhd-rung-diamante, .adhd-rung-super,
-        .adhd-rung-racha .adhd-ember, .adhd-rung-diamante .adhd-sparkle,
-        .adhd-rung-super .adhd-sparkle, .adhd-shine, .adhd-loss-flash,
-        .adhd-rail-head::after, .adhd-rail-head.urgent, .adhd-rail-head.adhd-rail-wrap, .adhd-part2, .adhd-ring, .adhd-seg.adhd-blink,
-        .adhd-seg.adhd-legendary,
-        .adhd-rung-prev, .adhd-halo,
-        .adhd-seg.adhd-active.adhd-rung-madera::before,
-        .adhd-seg.adhd-active.adhd-rung-bronce::before,
-        .adhd-seg.adhd-active.adhd-rung-plata::before {
+      /* ===== animations-panel-setting: kill switch (la info nunca depende de la animación) =====
+         Antes era una regla @media (prefers-reduced-motion: reduce). Ahora es
+         la clase body.adhd-motion-off, que JS alterna según el nivel del usuario
+         y la preferencia del sistema (ver aplicarMotion). Motivo: una sola
+         fuente de verdad, así el CSS y el JS no pueden discrepar.
+
+         ALCANCE: SOLO EFECTOS. Las pieles de los peldaños (.adhd-rung-racha /
+         -diamante / -super con su .adhd-ember / .adhd-sparkle / .adhd-shine, y las
+         texturas ::before de los tramos) quedan FUERA a propósito: son material,
+         no animación, y reward-fx solo exige que los EFECTOS tengan variante
+         calmada. Apagarlas sacaba la identidad visual del peldaño ganado, y el
+         usuario no tenía forma de recuperarlas desde el script.
+
+         El barrido de la cabeza del riel (.adhd-rail-head::after) sigue adentro:
+         es animación, y era su única señal de vida. El costo perceptual de
+         apagarlo está escrito en el requirement de motion-preference.
+
+         Prefijo explícito en vez de anidamiento CSS: el archivo se inyecta en
+         cualquier browser y no vale depender de soporte de nesting. */
+        body.adhd-motion-off .adhd-loss-flash,
+        body.adhd-motion-off .adhd-halo,
+        body.adhd-motion-off .adhd-rung-prev,
+        body.adhd-motion-off .adhd-rail-head::after,
+        body.adhd-motion-off .adhd-rail-head.urgent,
+        body.adhd-motion-off .adhd-rail-head.adhd-rail-wrap,
+        body.adhd-motion-off .adhd-part2,
+        body.adhd-motion-off .adhd-ring,
+        body.adhd-motion-off .adhd-seg.adhd-blink,
+        body.adhd-motion-off .adhd-seg.adhd-legendary {
           animation-duration: 1ms !important; animation-iteration-count: 1 !important; animation-delay: 0ms !important;
         }
-        .adhd-part2, .adhd-ring { display:none; }
-      }
+        body.adhd-motion-off .adhd-part2,
+        body.adhd-motion-off .adhd-ring { display:none; }
     `);
 
     function findBar() {
@@ -1968,7 +2019,55 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
     // count medido en el harness: DuoReward a 100 sprites daba p95 47ms (frames
     // perdidos) y a 36 da p95 25ms. Los cristales no tienen ese costo (p95 17.5ms
     // con 24), asi que solo se toca la densidad del Duo.
-    const FX_OPTS = { StreakFlames: {}, CrystalReward: {}, DuoReward: { count: 36 } };
+    // animations-panel-setting: una sola fuente de verdad para "motion off".
+    // El CSS usa la clase body.adhd-motion-off; acá se decide y se aplica.
+    const REDUCED_MQ = '(prefers-reduced-motion: reduce)';
+    let motionMql = null;   // listener activo solo mientras el nivel es 'system'
+
+    function motionOff() {
+      const sys = typeof matchMedia === 'function' ? matchMedia(REDUCED_MQ).matches : false;
+      return resolveMotion(cfg.motionLevel, sys);
+    }
+
+    // Aplica el nivel actual. Idempotente: se puede llamar sin miedo.
+    // Destruye las instancias cacheadas porque los 3 modulos congelan
+    // `this.reduced` en su constructor (design decision 5).
+    function aplicarMotion() {
+      const off = motionOff();
+      document.body.classList.toggle('adhd-motion-off', off);
+      if (fxInstances) destroyRewardFx();
+      return off;
+    }
+
+    // Con 'system' seguimos la preferencia del escritorio en vivo; con un
+    // override explicito no tiene sentido seguir escuchando (design decision 6).
+    function syncMotionListener() {
+      const quiere = cfg.motionLevel === 'system' && typeof matchMedia === 'function';
+      if (quiere && !motionMql) {
+        motionMql = matchMedia(REDUCED_MQ);
+        if (typeof motionMql.addEventListener === 'function') {
+          motionMql.addEventListener('change', aplicarMotion);
+        } else if (typeof motionMql.addListener === 'function') {
+          motionMql.addListener(aplicarMotion);   // Safari viejo
+        }
+      } else if (!quiere && motionMql) {
+        if (typeof motionMql.removeEventListener === 'function') {
+          motionMql.removeEventListener('change', aplicarMotion);
+        } else if (typeof motionMql.removeListener === 'function') {
+          motionMql.removeListener(aplicarMotion);
+        }
+        motionMql = null;
+      }
+    }
+
+    // 4.2: el valor efectivo viaja por respectReducedMotion, que los 3 modulos
+    // ya aceptan. Se calculan fresh en cada fxInstance() porque el nivel
+    // puede cambiar entre dos efectos.
+    const fxOpts = () => ({
+      StreakFlames: { respectReducedMotion: motionOff() },
+      CrystalReward: { respectReducedMotion: motionOff() },
+      DuoReward: { count: 36, respectReducedMotion: motionOff() },
+    });
     const FX_BY_RUNG = { 3: 'StreakFlames', 4: 'CrystalReward', 5: 'DuoReward' };
     const fxInstances = {};    // nombre -> instancia viva (larga, se reutiliza)
     const fxLastFire = {};     // nombre -> timestamp del ultimo burst
@@ -1980,7 +2079,7 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
       if (fxInstances[name]) return fxInstances[name];
       const Ctor = window[name];
       if (typeof Ctor !== 'function') return null;
-      fxInstances[name] = new Ctor(FX_OPTS[name] || {}); // el modulo crea su overlay
+      fxInstances[name] = new Ctor(fxOpts()[name] || {}); // el modulo crea su overlay
       return fxInstances[name];
     }
 
@@ -2617,6 +2716,13 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
             <div class="adhd-hint">${tr(cfg.lang, 'hintTimerGoal')}</div>
             <div style="font-size:11px;color:#666;margin-top:4px;">${isEn ? 'Avg' : 'Promedio'}: ${avgDisplay}</div>
           </div>
+          <label for="adhd-motion">${tr(cfg.lang, 'lblMotion')}</label>
+          <select id="adhd-motion">
+            <option value="system"${cfg.motionLevel === 'system' ? ' selected' : ''}>${tr(cfg.lang, 'motionSystem')}</option>
+            <option value="always"${cfg.motionLevel === 'always' ? ' selected' : ''}>${tr(cfg.lang, 'motionAlways')}</option>
+            <option value="never"${cfg.motionLevel === 'never' ? ' selected' : ''}>${tr(cfg.lang, 'motionNever')}</option>
+          </select>
+          <div class="adhd-hint">${tr(cfg.lang, 'hintMotion')}</div>
           </div>
         </details>
       `;
@@ -2686,6 +2792,19 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
       });
       panel.querySelector('#adhd-timer-label').addEventListener('change', (e) => {
         setCfg('timerShowLabel', e.target.checked);
+      });
+
+      // animations-panel-setting: 3.2 persistir + 4.1/4.4 aplicar en vivo.
+      // No se reconstruye el panel: el <select> ya muestra el valor nuevo, y
+      // aplicarMotion() sincroniza la clase del <body> y las instancias de FX.
+      panel.querySelector('#adhd-motion').addEventListener('change', (e) => {
+        const v = e.target.value;
+        // Un valor fuera de la lista no se persiste: el select siempre manda
+        // uno de los tres, pero el storage podria venir editado a mano.
+        if (MOTION_LEVELS.indexOf(v) === -1) { e.target.value = cfg.motionLevel; return; }
+        setCfg('motionLevel', v);
+        syncMotionListener();
+        aplicarMotion();
       });
 
       // tramo-fx-round2 (D4): calibración en vivo — cicla los 6 bursts + un escalón
@@ -2786,6 +2905,12 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
       raceTimes = loadTimes();
       if (cfg.journalEnabled) journal = getJournal();
       injectSettingsBtn();
+
+      // animations-panel-setting: el nivel de animacion no depende de que haya
+      // barra de leccion, asi que se aplica aca y no en el primer render(). Con
+      // el default 'system' queda exactamente como antes del cambio.
+      syncMotionListener();
+      aplicarMotion();
 
       // El sondeo queda con su única responsabilidad: encontrar la barra y
       // renderizar. La barra de lección no existe en pantallas que no son

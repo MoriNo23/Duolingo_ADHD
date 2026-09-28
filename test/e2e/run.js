@@ -142,6 +142,13 @@ function checkReport(rep, results, { expectLesson }) {
     assert(results, 'un segmento queda activo', rep.activeSeg === 1, rep.activeSeg);
     assert(results, 'el riel aparece', rep.rail === true);
     assert(results, 'el cronometro aparece', rep.crono === true);
+    // animations-panel-setting
+    // animations-panel-setting: el override 'always' gana contra el
+    // prefers-reduced-motion del harness. El control del panel se prueba en
+    // el core contra el fuente publicado; aca se prueba el efecto real.
+    assert(results, "con motionLevel 'always' el body NO queda con motion-off",
+      rep.motionOffClass === false,
+      'sembrado=' + rep.motionSeeded + ' clase=' + rep.motionOffClass);
     assert(results, 'la etiqueta del riel nombra un peldaño real',
       ['MADERA', 'BRONCE', 'PLATA', 'RACHA', 'DIAMANTE', 'SUPER'].includes(rep.railLabel),
       rep.railLabel);
@@ -174,6 +181,10 @@ function checkReport(rep, results, { expectLesson }) {
     assert(results, 'fuera de una leccion NO hay overlay', rep.overlay === false);
     assert(results, 'fuera de una leccion NO hay segmentos', rep.segs === 0, rep.segs);
     assert(results, 'fuera de una leccion NO hay riel', rep.rail === false);
+    // animations-panel-setting: el nivel se aplica SIN barra de leccion.
+    assert(results, "con motionLevel 'never' el body SI queda con motion-off, aun sin leccion",
+      rep.motionOffClass === true,
+      'sembrado=' + rep.motionSeeded + ' clase=' + rep.motionOffClass);
   }
 }
 

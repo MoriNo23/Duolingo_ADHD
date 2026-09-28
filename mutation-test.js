@@ -50,6 +50,15 @@ const MUTATORS = [
   c => firstReplace(c, /return \{ lap, frac: total - lap, tier: tierForLap\(lap\) \};/, 'return { lap, frac: total - lap, tier: tierForLap(lap + 1) };', 'ladderAt: peldano de la vuelta siguiente'),
   c => firstReplace(c, /rung: L\.tier, isFast: L\.tier >= 4 \};/, 'rung: L.tier, isFast: L.tier >= 5 };', 'evaluateRace: isFast 4 → 5'),
   c => firstReplace(c, /return \{ lap: L\.lap, frac: L\.frac, tier: L\.tier, rung: L\.tier, isFast: L\.tier >= 4 \};/, 'return { lap: L.lap, frac: L.frac, tier: L.tier, rung: L.tier, isFast: L.tier >= 4, lost: L.tier < 0 };', 'evaluateRace: lost reintroducido'),
+  // ---------- animations-panel-setting: la precedencia motion ----------
+  // El nucleo de este change. Si un mutante sobrevive, el default 'system' o
+  // el override explicito dejan de estar garantizados.
+  c => firstReplace(c, /if \(level === 'never'\) return true;/, "if (level === 'never') return false;", "resolveMotion: la rama 'never' NO apaga"),
+  c => firstReplace(c, /if \(level === 'always'\) return false;/, "if (level === 'always') return true;", "resolveMotion: la rama 'always' apaga"),
+  c => firstReplace(c, /if \(level === 'always'\) return false;/, '', "resolveMotion: 'always' cae al sistema (rama borrada)"),
+  c => firstReplace(c, /return !!systemReduced;/, 'return !systemReduced;', "resolveMotion: fallback invertido"),
+  c => firstReplace(c, /return !!systemReduced;/, 'return systemReduced;', "resolveMotion: sin coercion a booleano"),
+  c => firstReplace(c, /motionLevel: 'system',/, "motionLevel: 'never',", "DEFAULTS.motionLevel 'system' \u2192 'never'"),
 ];
 
 // ---------- correr los tests contra el SRC actual ----------

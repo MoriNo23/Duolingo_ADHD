@@ -224,6 +224,87 @@ describe('DEFAULTS', () => {
     assert.equal(C.rungAt, undefined);
     assert.equal(C.bandEdges, undefined);
     assert.equal(C.LOST, undefined);              // no hay estado de derrota
+    // animations-panel-setting: el default tiene que ser 'system' para que un
+    // config guardado antes del cambio no cambie de comportamiento.
+    assert.equal(C.DEFAULTS.motionLevel, 'system');
+    assert.deepEqual(C.MOTION_LEVELS, ['system', 'always', 'never']);
+  });
+
+  test('un config guardado sin motionLevel cae en system tras el merge', () => {
+    const cfgViejo = { separators: 4, lang: 'en', timerMode: true };
+    const merged = Object.assign({}, C.DEFAULTS, cfgViejo);
+    assert.equal(merged.motionLevel, 'system');
+  });
+});
+
+// animations-panel-setting: la precedencia entre el override del usuario y la
+// preferencia del sistema. Toda la matriz, en los dos sentidos.
+describe('animations-panel-setting: i18n del control de animaciones', () => {
+  const CLAVES = ['lblMotion', 'hintMotion', 'motionSystem', 'motionAlways', 'motionNever'];
+
+  test('las claves existen en los dos idiomas', () => {
+    for (const lang of ['es', 'en']) {
+      for (const k of CLAVES) {
+        const v = C.tr(lang, k);
+        assert.equal(typeof v, 'string', lang + '/' + k);
+        assert.notEqual(v, k, lang + '/' + k + ' cae al fallback');
+        assert.ok(v.length > 0);
+      }
+    }
+  });
+
+  test('los tres estados tienen texto distinto en cada idioma', () => {
+    for (const lang of ['es', 'en']) {
+      const vals = ['motionSystem', 'motionAlways', 'motionNever'].map(k => C.tr(lang, k));
+      assert.equal(new Set(vals).size, 3, lang + ': los tres estados deben ser distintos');
+    }
+  });
+
+  test('es y en no quedan desbalanceados', () => {
+    const a = new Set(Object.keys(C.I18N.es));
+    const b = new Set(Object.keys(C.I18N.en));
+    assert.deepEqual([...a].filter(k => !b.has(k)), []);
+    assert.deepEqual([...b].filter(k => !a.has(k)), []);
+  });
+});
+
+describe('animations-panel-setting: resolveMotion', () => {
+  test('system: sigue al sistema en los dos sentidos', () => {
+    assert.equal(C.resolveMotion('system', true), true);
+    assert.equal(C.resolveMotion('system', false), false);
+  });
+
+  test('always: gana contra un sistema que pide reduce', () => {
+    assert.equal(C.resolveMotion('always', true), false);
+    assert.equal(C.resolveMotion('always', false), false);
+  });
+
+  test('never: gana contra un sistema sin preferencia', () => {
+    assert.equal(C.resolveMotion('never', true), true);
+    assert.equal(C.resolveMotion('never', false), true);
+  });
+
+  test('un valor desconocido cae en system (no cambia el behavior previo)', () => {
+    for (const basura of ['', 'SI', 'off', 'reduced', null, undefined, 0, {}]) {
+      assert.equal(C.resolveMotion(basura, true), true,  'con sistema reduce: ' + String(basura));
+      assert.equal(C.resolveMotion(basura, false), false, 'con sistema normal: ' + String(basura));
+    }
+  });
+
+  test('el resultado es siempre booleano, nunca undefined', () => {
+    for (const lvl of [...C.MOTION_LEVELS, 'basura']) {
+      for (const sys of [true, false, undefined, null, 0, 1]) {
+        assert.equal(typeof C.resolveMotion(lvl, sys), 'boolean');
+      }
+    }
+  });
+
+  test('systemReduced se normaliza a booleano', () => {
+    // truthy -> off; falsy -> on. resolveMotion devuelve !!.
+    assert.equal(C.resolveMotion('system', 1), true);
+    assert.equal(C.resolveMotion('system', 0), false);
+    assert.equal(C.resolveMotion('system', 'sí'), true);
+    assert.equal(C.resolveMotion('system', ''), false);
   });
 });
 
@@ -396,6 +477,200 @@ describe('rail-fixed-lap-ceiling: escalera por vueltas', () => {
 // test-published-file-ci: el archivo publicado es el sujeto de test, y no
 // debe volver a arrastrar scaffolding que solo tenía sentido para una copia dev
 // ---------------------------------------------------------------------
+// animations-panel-setting: el kill switch de reduced-motion se acoto a
+// EFECTOS. Las pieles de los peldaños son material, no animacion, y
+// reward-fx solo exige que los efectos tengan variante calmada. Este test es la
+// red que hace que esa decision no se deshaga sin querer.
+// La resolucion (puro) y la clase del <body> (efecto) tienen que estar atadas
+// por UNA sola llamada, y esa llamada tiene que ser idempotente: la corre el
+// init, el listener de la media query y el handler del panel, en ese orden y a
+// veces con el mismo valor. Si no lo fuera, el segundo toggle dejaria la clase
+// en un estado distinto al primero.
+describe('animations-panel-setting: la clase del body va atada a la resolucion', () => {
+  const src = publishedSource();
+
+  function cuerpoDe(nombre) {
+    const i = src.indexOf('function ' + nombre + '(');
+    assert.ok(i > -1, 'no existe ' + nombre);
+    return src.slice(i, src.indexOf('\n  }', i));
+  }
+
+  test('motionOff() es la unica fuente del booleano', () => {
+    const c = cuerpoDe('motionOff');
+    assert.equal(/return resolveMotion\(cfg\.motionLevel, sys\);/.test(c), true,
+      'motionOff tiene que delegar en resolveMotion, no decidir por su cuenta');
+    assert.equal(/matchMedia/.test(c), true, 'motionOff tiene que leer la preferencia del sistema');
+  });
+
+  test('aplicarMotion alterna la clase con la forma idempotente', () => {
+    const c = cuerpoDe('aplicarMotion');
+    // classList.toggle(clase, booleano) es idempotente por definicion; un
+    // add/remove con if/else no lo seria.
+    assert.equal(/classList\.toggle\('adhd-motion-off', off\)/.test(c), true,
+      'tiene que usar classList.toggle(clase, booleano)');
+    assert.equal(/if \(off\)/.test(c), false, 'un if/else sobre la clase no es idempotente');
+    assert.equal(/return off;/.test(c), true, 'aplicarMotion tiene que devolver el valor aplicado');
+  });
+
+  test('aplicarMotion destruye las instancias cacheadas antes de reutilizarlas', () => {
+    // design decision 5: los 3 modulos congelan this.reduced en el
+    // constructor, asi que cambiar el nivel no alcanza con volver a pintar:
+    // hay que descartar la instancia cacheada.
+    const c = cuerpoDe('aplicarMotion');
+    assert.equal(/destroyRewardFx\(\)/.test(c), true,
+      'sin destruir las instancias, el nivel nuevo no llega a los modulos');
+  });
+
+  test('la clase y la resolucion no se pueden desincronizar', () => {
+    // Un unico punto de verdad: quien pone la clase es aplicarMotion, y usa
+    // el valor de motionOff(). Si otro lugar tocara la clase, esto se rompe.
+    const c = cuerpoDe('aplicarMotion');
+    assert.equal((src.match(/classList\.toggle\('adhd-motion-off'/g) || []).length, 1,
+      'la clase tiene que alternarse en un solo lugar del archivo');
+  });
+
+  test('con el default system y sin preferencia del sistema, la clase NO se aplica', () => {
+    // Reproduce el arranque real: DEFAULTS + resolveMotion.
+    const off = C.resolveMotion(C.DEFAULTS.motionLevel, false);
+    assert.equal(off, false, 'sin preferencia del sistema, el default no apaga nada');
+  });
+
+  test('con el default system y el sistema pidiendo reduce, la clase SI se aplica', () => {
+    // Esta es la maquina del usuario: enable-animations=false en KDE.
+    const off = C.resolveMotion(C.DEFAULTS.motionLevel, true);
+    assert.equal(off, true);
+  });
+});
+
+// animations-panel-setting: el control del panel vive en un template string.
+// desde el fixture e2e resulto fragil (abrir/cerrar el panel desde el arnés),
+// asi que aca se verifica el fuente publicado: es el mismo archivo que se
+// instala, y el template es lo que hay que proteger.
+describe('animations-panel-setting: el control esta en el panel', () => {
+  const src = publishedSource();
+
+  test('el panel declara el control con los tres estados', () => {
+    assert.equal(/id="adhd-motion"/.test(src), true, 'falta el control #adhd-motion');
+    for (const v of ['system', 'always', 'never']) {
+      assert.equal(new RegExp('value="' + v + '"').test(src), true, 'falta la opcion ' + v);
+    }
+  });
+
+  test('cada opcion marca selected segun cfg.motionLevel', () => {
+    // El template tiene que comparar contra cfg, no hardcodear un selected.
+    for (const v of ['system', 'always', 'never']) {
+      const patron = "cfg.motionLevel === '" + v + "' ? ' selected' : ''";
+      assert.equal(src.includes(patron), true, 'la opcion ' + v + ' no refleja el cfg');
+    }
+  });
+
+  test('el control esta FUERA de #adhd-timer-opts', () => {
+    // Si estuviera adentro, se ocultaria con timerMode en off, y el nivel de
+    // animacion aplica a todo el script, no solo al cronometro.
+    const iOpts = src.indexOf('id="adhd-timer-opts"');
+    const iCierre = src.indexOf("adhd-timer-opts", iOpts + 1);
+    const sel = src.indexOf('id="adhd-motion"');
+    assert.ok(iOpts > -1 && sel > -1, 'faltan los controles');
+    const bloqueTimer = src.slice(iOpts, sel);
+    assert.equal(bloqueTimer.includes('</div>'), true, 'el div del timer deberia cerrarse antes del control de motion');
+  });
+
+  test('cambiar el control persiste, sincroniza el listener y aplica', () => {
+    // El handler tiene que hacer las tres cosas: setCfg, syncMotionListener y
+    // aplicarMotion. Sin las dos ultimas el cambio no se veria en vivo.
+    const i = src.indexOf("querySelector('#adhd-motion')");
+    assert.ok(i > -1, 'falta el listener del control');
+    const handler = src.slice(i, i + 700);
+    assert.equal(/setCfg\('motionLevel'/.test(handler), true, 'no persiste');
+    assert.equal(/syncMotionListener\(\)/.test(handler), true, 'no sincroniza el listener');
+    assert.equal(/aplicarMotion\(\)/.test(handler), true, 'no aplica en vivo');
+    assert.equal(/MOTION_LEVELS\.indexOf/.test(handler), true, 'no valida el valor');
+  });
+
+  test('init aplica el nivel al arrancar, sin depender de la leccion', () => {
+    const i = src.indexOf('function init()');
+    const cuerpo = src.slice(i, src.indexOf('\n  }', i));   // todo el cuerpo de init()
+    assert.equal(/aplicarMotion\(\)/.test(cuerpo), true, 'init no aplica el nivel');
+    assert.equal(/syncMotionListener\(\)/.test(cuerpo), true, 'init no suscribe el listener');
+    // Tiene que estar antes del sondeo de la barra: si Depends de que haya
+    // leccion, no se aplica en /learn.
+    const iSondeo = cuerpo.indexOf('ensureRoots()');
+    const iAplica = cuerpo.indexOf('aplicarMotion()');
+    assert.ok(iAplica > -1 && iSondeo > -1);
+    assert.equal(iAplica < iSondeo, true, 'aplicarMotion deberia ir antes del primer render');
+  });
+
+  test('los 3 modulos canvas reciben el valor efectivo, no leen matchMedia solos', () => {
+    // fxOpts() centraliza respectReducedMotion. Si un modulo vuelve a leer
+    // matchMedia por su cuenta, el override del usuario deja de aplicarle.
+    assert.equal(/const fxOpts = \(\) => \(\{/.test(src), true, 'falta fxOpts()');
+    const cuerpo = src.slice(src.indexOf('const fxOpts'), src.indexOf('const fxOpts') + 500);
+    for (const m of ['StreakFlames', 'CrystalReward', 'DuoReward']) {
+      assert.equal(new RegExp(m + ': \\{[^}]*respectReducedMotion: motionOff\\(\\)').test(cuerpo), true,
+        m + ' no recibe el valor efectivo');
+    }
+    assert.equal(/new Ctor\(FX_OPTS\[/.test(src), false, 'fxInstance todavia usa la constante vieja');
+  });
+});
+
+describe('animations-panel-setting: el kill switch solo silencia efectos', () => {
+  const src = publishedSource();
+
+  // Selectores del bloque, sin los comentarios que los mencionan.
+  function selectoresDelBloque() {
+    const b = src.match(/\/\* =+ animations-panel-setting: kill switch[\s\S]*?display:none; \}/);
+    assert.ok(b, 'el bloque del kill switch tiene que existir en el archivo publicado');
+    const sinComentarios = b[0].replace(/\/\*[\s\S]*?\*\//g, '');
+    return sinComentarios.slice(0, sinComentarios.indexOf('{'));
+  }
+
+  const PIELES = [
+    '.adhd-rung-racha', '.adhd-rung-diamante', '.adhd-rung-super',
+    '.adhd-ember', '.adhd-sparkle', '.adhd-shine',
+    'adhd-rung-madera::before', 'adhd-rung-bronce::before', 'adhd-rung-plata::before',
+  ];
+  const EFECTOS = [
+    '.adhd-loss-flash', '.adhd-halo', '.adhd-rung-prev',
+    '.adhd-rail-head::after', '.adhd-rail-head.urgent', '.adhd-rail-head.adhd-rail-wrap',
+    '.adhd-part2', '.adhd-ring', '.adhd-seg.adhd-blink', '.adhd-seg.adhd-legendary',
+  ];
+
+  test('las pieles de peldaño NO estan en el bloque', () => {
+    const sel = selectoresDelBloque();
+    for (const x of PIELES) {
+      assert.equal(sel.includes(x), false, x + ' no deberia estar en el kill switch');
+    }
+  });
+
+  test('los efectos SI estan en el bloque', () => {
+    const sel = selectoresDelBloque();
+    for (const x of EFECTOS) {
+      assert.equal(sel.includes(x), true, x + ' deberia estar en el kill switch');
+    }
+  });
+
+  test('el bloque usa la clase body.adhd-motion-off, no @media', () => {
+    // Con @media el nivel del usuario no podria silenciar por CSS, y el
+    // 'always' no tendria contraparte en la hoja de estilos. Se chequea sobre
+    // el bloque SIN comentarios, porque el comentario explica la mudanza y
+    // menciona el @media anterior a proposito.
+    const b = src.match(/\/\* =+ animations-panel-setting: kill switch[\s\S]*?display:none; \}/)[0]
+      .replace(/\/\*[\s\S]*?\*\//g, '');
+    assert.equal(/@media/.test(b), false);
+    assert.equal(/body\.adhd-motion-off/.test(b), true);
+    assert.equal(src.includes('body.adhd-motion-off'), true);
+  });
+
+  test('reintroducir una piel en el bloque rompe este test', () => {
+    // El test tiene que ser sensible: si alguien agrega .adhd-shine o
+    // .adhd-rung-super de vuelta, el caso de arriba falla.
+    const sel = selectoresDelBloque();
+    const contaminado = sel + ', body.adhd-motion-off .adhd-shine';
+    assert.equal(contaminado.includes('.adhd-shine'), true, 'el detector tiene que ver la contaminacion');
+    assert.equal(PIELES.some(x => contaminado.includes(x)), true);
+  });
+});
+
 describe('el archivo publicado no arrastra scaffolding de build', () => {
   const src = publishedSource();
 

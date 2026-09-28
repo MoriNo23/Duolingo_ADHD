@@ -70,6 +70,7 @@ Open the settings panel with the **tab docked to the right edge** of the screen.
 | **+ seconds** | **0s** | Fine adjustment on top of the minutes, in 5s steps. |
 | **Reward effects** | **on** | Full-screen celebration when a segment is closed on a high tier: **Streak** → animated flames, **Diamond** → faceted crystals, **Super** → a shower of Duo. Lower tiers keep the particle burst only. |
 | **Test effects** | — | Cycles all six bursts and the lost state on the live bar, so you can tune the look without waiting. |
+| **Animations** | **respect system** | Follows the desktop's reduced-motion setting. Set it to **always** to force every effect on, or **never** to calm them all down. Affects this script only — it never changes your OS settings. Toggling it applies live. |
 | **Local journal** | **off** | Starts counting lessons, segments, average time, day streak and total lessons. Off by default; nothing is recorded until you enable it. |
 | **Reset values** | — | Restores all defaults (keeps your chosen language). |
 
@@ -86,6 +87,7 @@ Open the settings panel with the **tab docked to the right edge** of the screen.
 | **+ segundos** | **0s** | Ajuste fino sobre los minutos, en pasos de 5s. |
 | **Efectos de recompensa** | **activado** | Celebración a pantalla completa al cerrar un tramo de peldaño alto: **Racha** → llamas animadas, **Diamante** → cristales facetados, **Super** → lluvia de Duo. Los peldaños bajos conservan solo las partículas. |
 | **Probar efectos** | — | Cicla los seis bursts y un escalón a la baja sobre la barra real, para que puedas ver los efectos sin esperar. |
+| **Animaciones** | **respetar sistema** | Sigue la preferencia de movimiento reducido del escritorio. Ponela en **siempre** para forzar todos los efectos, o en **nunca** para calmarlos. Afecta solo a este script: nunca cambia la configuración del sistema operativo. Se aplica al instante. |
 | **Diario local** | **desactivado** | Empieza a contar lecciones, tramos, tiempo medio, racha de días y lecciones totales. Apagado por defecto; no se registra nada hasta que lo actives. |
 | **Restablecer valores** | — | Vuelve todo a los valores por defecto (conserva el idioma que elegiste). |
 
