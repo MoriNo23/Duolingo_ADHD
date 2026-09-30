@@ -57,11 +57,19 @@
   // animations-panel-setting: el nivel sembrado depende de la ruta, para que las
   // dos corridas del check cubran los dos lados del override Y el caso sin
   // barra de leccion.
-  //   /lesson/         -> 'always' : el body NO lleva adhd-motion-off
-  //   /not-a-lesson/.. -> 'never'  : el body SI lo lleva, sin overlay ni riel
+  //   /lesson/           -> 'always' : el body NO lleva adhd-motion-off
+  //   /lesson/calm-system/ -> 'system' + prefers-reduced-motion simulado: el caso
+  //                           real de una maquina que pide calma (el body lleva
+  //                           la clase y los efectos de canvas deben calmarse)
+  //   /lesson/calm-never/ -> 'never' sin reduce del sistema: el override explicito
+  //                           tiene que calmar los canvas igual (no solo el CSS)
+  //   /not-a-lesson/..   -> 'never'  : el body SI lo lleva, sin overlay ni riel
   // OJO: esto vive en la PRIMERA IIFE (los stubs de GM), asi que el snapshot,
   // que esta en la segunda, no lo ve. Va por window.
-  window.__motionSeeded = location.pathname.indexOf('not-a-lesson') === -1 ? 'always' : 'never';
+  var seed = location.pathname;
+  window.__motionSeeded = seed.indexOf('calm-system') !== -1 ? 'system'
+    : seed.indexOf('calm-never') !== -1 ? 'never'
+    : seed.indexOf('not-a-lesson') !== -1 ? 'never' : 'always';
   store.adhd_config = { lang: 'es', timerMode: true, timerMinutes: 0, timerSeconds: __GOAL__, motionLevel: window.__motionSeeded };
 
   // Reloj controlable: __t se avanza desde el reporte.
@@ -70,6 +78,60 @@
   Date.now = function () { return window.__t; };
   window.__advance = function (ms) { window.__t += ms; };
   window.__now = realNow;
+
+  // fix-reward-fx-static-and-duo-crash: la preferencia del sistema se puede
+  // simular. El stub se instala SOLO en la ruta que lo pide, para que el resto
+  // de las rutas de la suite siga midiendo contra el matchMedia real.
+  window.__rmReduce = location.pathname.indexOf('calm-system') !== -1;
+  window.__rmReduceReal = (typeof matchMedia === 'function')
+    ? matchMedia('(prefers-reduced-motion: reduce)').matches : false;
+  if (window.__rmReduce) {
+    var realMatchMedia = window.matchMedia.bind(window);
+    window.matchMedia = function (q) {
+      if (String(q).indexOf('prefers-reduced-motion') === -1) return realMatchMedia(q);
+      return {
+        media: q, matches: true, onchange: null,
+        addEventListener: function () {}, removeEventListener: function () {},
+        addListener: function () {}, removeListener: function () {},
+        dispatchEvent: function () { return false; },
+      };
+    };
+  }
+
+  // ---- reloj y frames del arnés -------------------------------------------
+  // Los tres efectos de recompensa dibujan con requestAnimationFrame y leen el
+  // tiempo de performance.now(). En headless no hay frames que garanteicen, así
+  // que el arnés los produce: un reloj propio (window.__perf, +FRAME_MS por
+  // frame) y una cola de rAF que se entrega con el timestamp del frame. Todo el
+  // guion queda determinista, sin depender del compositor.
+  var FRAME_MS = 16;
+  window.__perf = 0;
+  window.performance.now = function () { return window.__perf; };
+  var rafQ = [], rafNext = 0, rafDead = {};
+  // Offset de timestamp por request, en orden de pedido. Un offset > 0 entrega
+  // ese callback con un timestamp mas viejo que el reloj: modela el burst
+  // disparado desde una tarea cuando el frame que lo entrega ya estaba en curso
+  // (por eso el primer frame del efecto ve ms < 0).
+  window.__staleQueue = [];
+  window.requestAnimationFrame = function (cb) {
+    var id = ++rafNext;
+    rafQ.push({ id: id, cb: cb, stale: window.__staleQueue.length ? window.__staleQueue.shift() : 0 });
+    return id;
+  };
+  window.cancelAnimationFrame = function (id) { rafDead[id] = true; };
+  window.__frames = function (n) {
+    var ran = 0;
+    for (var i = 0; i < n; i++) {
+      var batch = rafQ; rafQ = [];
+      window.__perf += FRAME_MS;            // el frame avanza mientras corre
+      for (var j = 0; j < batch.length; j++) {
+        if (rafDead[batch[j].id]) continue;
+        batch[j].cb(batch[j].stale ? window.__perf - batch[j].stale : window.__perf);
+        ran++;
+      }
+    }
+    return ran;
+  };
 
   // El enganche de test debe quedar INERTE aca (no hay arnés definido).
   window.__hookFired = false;
@@ -132,6 +194,8 @@
       // se prueba el efecto real sobre <body>, que es lo que se ve.
       motionSeeded: window.__motionSeeded,
       motionOffClass: document.body.classList.contains('adhd-motion-off'),
+      rmReduce: window.__rmReduce,
+      rmReduceReal: window.__rmReduceReal,
       railTitle: (q('.adhd-rail-track') || {}).title || null,
       styleRules: (function () {
         var st = document.querySelectorAll('style');
@@ -174,16 +238,429 @@
     };
   }
 
-  setTimeout(function () {
+  // ---------------------------------------------------------------------
+  // fix-reward-fx-static-and-duo-crash: los efectos de recompensa se miden
+  // sobre el canvas, no sobre la clase del <body> (que la suite ya cubria).
+  // Dos mediciones, las dos por el camino real del script:
+  //
+  //  1) staleFrameCheck(): cada burst se agenda con un offset de 30ms, así el
+  //     primer frame se entrega con un timestamp mas viejo que el reloj. Es el
+  //     caso real de un burst disparado desde una tarea cuando el frame que lo
+  //     entrega ya estaba en curso: el modulo recibia ms < 0, el radio de la
+  //     onda de choque se volvia negativo y Chromium tiraba IndexSizeError
+  //     DENTRO del callback, con lo que la reposicion del siguiente frame nunca
+  //     ocurria y el efecto quedaba muerto.
+  //
+  //  2) samplePanelEffects(): el boton "Probar efectos" del panel dispara
+  //     playRewardFx() para los tres peldanios altos. Se muestrea la mascara
+  //     binaria de cada canvas frame a frame: si cambia, el efecto se mueve; si
+  //     no cambia, esta congelado. Ademas se miden el tiempo visible y la
+  //     tinta, que son lo que distingue "calma" de "foto fija a pantalla
+  //     completa" (que es lo que se quejaba el usuario).
+  // ---------------------------------------------------------------------
+  var FX_TIERS = ['racha', 'diamante', 'super'];   // orden de disparo del boton
+  var PROBE_W = 128, PROBE_H = 96;
+  var probeCv = document.createElement('canvas');
+  probeCv.width = PROBE_W; probeCv.height = PROBE_H;
+  var pctx = probeCv.getContext('2d', { willReadFrequently: true });
+
+  // Forma del efecto, en tres medidas independientes:
+  //  shape: momentos ponderados por alpha (centroide y covarianza). Un
+  //    desvanecido global escala todos los pesos por igual y deja los momentos
+  //    igual: no cuenta como movimiento. Una deformacion, un giro o un traslado
+  //    los mueve. Es la medida de "¿se mueve la figura?".
+  //  comps: componentes conexas de la mascara. Es la medida de "¿cuantos
+  //    elementos hay?", que para estos modulos es la que distingue una version
+  //    calmada de la animada: con menos particulas el modulo agranda cada una
+  //    (la base se deriva de la grilla), asi que el AREA cubierta casi no baja
+  //    aunque la pantalla se vacie de elementos.
+  //  ink: fraccion de pantalla que ocupa la figura (relativa al alpha del frame).
+  function maskOf(canvas) {
+    pctx.clearRect(0, 0, PROBE_W, PROBE_H);
+    pctx.drawImage(canvas, 0, 0, PROBE_W, PROBE_H);
+    var d = pctx.getImageData(0, 0, PROBE_W, PROBE_H).data;
+    var max = 0, i;
+    for (i = 3; i < d.length; i += 4) if (d[i] > max) max = d[i];
+    // 1 bit por pixel: la mascara en crudo, para comparar dos instantes.
+    var bits = new Uint8Array((PROBE_W * PROBE_H) >> 3);
+    if (max < 8) return { bits: bits, on: 0, comps: 0, ink: 0 };
+    var cut = max * 0.35, on = 0;
+    var mask = new Uint8Array(PROBE_W * PROBE_H);
+    for (i = 0; i < d.length; i += 4) {
+      if (d[i + 3] < cut) continue;
+      var p = i >> 2;
+      mask[p] = 1; bits[p >> 3] |= (1 << (p & 7)); on++;
+    }
+    return { bits: bits, on: on, comps: countComponents(mask), ink: on / (PROBE_W * PROBE_H) };
+  }
+
+  // Fraccion de pixeles con alpha arriba del umbral relativo. Version liviana de
+  // maskOf (sin bitset ni componentes) para los bucles que solo preguntan
+  // "¿dibujo algo?".
+  function inkOf(canvas) {
+    pctx.clearRect(0, 0, PROBE_W, PROBE_H);
+    pctx.drawImage(canvas, 0, 0, PROBE_W, PROBE_H);
+    var d = pctx.getImageData(0, 0, PROBE_W, PROBE_H).data;
+    var max = 0, i;
+    for (i = 3; i < d.length; i += 4) if (d[i] > max) max = d[i];
+    if (max < 8) return 0;
+    var cut = max * 0.35, on = 0;
+    for (i = 3; i < d.length; i += 4) if (d[i] >= cut) on++;
+    return on / (PROBE_W * PROBE_H);
+  }
+
+  function countComponents(mask) {
+    var seen = new Uint8Array(mask.length), comps = 0, stack = [];
+    for (var i = 0; i < mask.length; i++) {
+      if (!mask[i] || seen[i]) continue;
+      comps++; seen[i] = 1; stack.push(i);
+      while (stack.length) {
+        var p = stack.pop(), px = p % PROBE_W, py = (p / PROBE_W) | 0;
+        for (var dy = -1; dy <= 1; dy++) {
+          for (var dx = -1; dx <= 1; dx++) {
+            var nx = px + dx, ny = py + dy;
+            if (nx < 0 || ny < 0 || nx >= PROBE_W || ny >= PROBE_H) continue;
+            var q = ny * PROBE_W + nx;
+            if (mask[q] && !seen[q]) { seen[q] = 1; stack.push(q); }
+          }
+        }
+      }
+    }
+    return comps;
+  }
+
+  function errCount() { return (window.__errors || []).length; }
+
+  function staleFrameCheck() {
+    var out = [];
+    var names = [['racha', window.StreakFlames], ['diamante', window.CrystalReward], ['super', window.DuoReward]];
+    var chain = Promise.resolve();
+    names.forEach(function (pair) {
+      chain = chain.then(function () {
+        var name = pair[0], Ctor = pair[1];
+        if (typeof Ctor !== 'function') { out.push({ name: name, missing: true }); return null; }
+        var before = errCount();
+        var opts = { count: 8, reduced: false };
+        var inst = Ctor === window.DuoReward ? new Ctor(opts) : new Ctor(opts);
+        // El Duo carga un sprite asincrono: se espera antes de armar el pedido
+        // del frame, asi el offset le toca al rAF del efecto y no a otro.
+        var ready = (typeof inst.ready !== 'undefined' && inst.ready) ? inst.ready : Promise.resolve();
+        return ready.then(function () {
+          window.__staleQueue.push(30);       // el primer frame vera ms = -30
+          var started = Ctor === window.DuoReward ? inst.burst() : (inst.start({ count: 8, duration: 1200, loop: false }), Promise.resolve());
+          return started;
+        }).then(function () {
+          var first = null, later = {}, order = [];
+          for (var i = 0; i < 40; i++) {
+            window.__frames(1);
+            var m = maskOf(inst.canvas);
+            if (m.ink > 0 && first === null) first = m.ink;
+            if (i > 2) {
+              later[m.h] = 1;
+              order.push(m.ink);
+            }
+          }
+          out.push({
+            name: name,
+            inkFirstFrame: first,                                  // null =primer frame invalido
+            inkAfter: order[order.length - 1],
+            distinctMasks: Object.keys(later).length,
+            stillScheduled: (inst.frame || 0) !== 0,
+            newErrors: window.__errors.slice(before),
+          });
+          try { inst.destroy(); } catch (e) { /* modulo sin destroy */ }
+        });
+      });
+    });
+    return chain.then(function () { report.fxStaleFrame = out; finish(); });
+  }
+
+  // fix-reward-fx-killed-by-transient-bar-loss: re-render de la fila de la leccion.
+  // Es lo que hace Duolingo al responder: la fila del header (boton de salir +
+  // barra) se reemplaza por nodos nuevos. El script detector se queda sin ancla un
+  // instante; con el codigo de antes, un solo batch sin barra tumbaba el efecto en
+  // vuelo, el cronometro y el timeline.
+  function detachHeader() {
+    // fix-reward-fx-killed-by-transient-bar-loss: el re-render de la fila de la
+    // leccion. NO es atomico: el nodo se desengancha en un task y vuelve a
+    // engancharse en el siguiente, y en el medio el observer corre con la leccion
+    // sin barra. Un reemplazo atomico jamas dejaria esa ventana, asi que con el
+    // codigo de antes el efecto sobrevivia y el harness no probaba nada.
+    //
+    // Se reengancha el MISMO nodo, que es lo que importa para el efecto: si
+    // vuelve otro nodo equivalente, el script ademas pierde el riel y el
+    // detective se queda sin barra, y eso es otro bug (no el de este change).
+    var row = document.querySelector('.lesson-header-row');
+    if (!row || !row.parentNode) return null;
+    var padre = row.parentNode;
+    padre.removeChild(row);
+    return { padre: padre, row: row };
+  }
+  function reattachHeader(guardado) {
+    if (guardado && !guardado.row.parentNode) guardado.padre.appendChild(guardado.row);
+  }
+
+  function samplePanelEffects(iters) {
+    return new Promise(function (resolve) {
+      var gear = document.querySelector('.adhd-btn');
+      if (!gear) { resolve(); return; }
+      gear.click();
+      var btn = document.querySelector('#adhd-test-fx');
+      if (!btn) { resolve(); return; }
+      // fix-reward-fx-static-and-duo-crash: el panel explica la calma cuando la
+      // decido el sistema y el usuario no dijo nada. Se lee con el panel abierto.
+      report.motionSystemHint = !!document.querySelector('#adhd-motion-system-hint');
+      report.motionHintText = (document.querySelector('#adhd-motion-system-hint') || {}).textContent || null;
+      btn.click();
+      // El canvas se identifica por IDENTIDAD, no por su posicion en el DOM: el
+      // script destruye cada efecto cuando termina, asi que el indice del
+      // querySelectorAll se reasigna cuando un canvas se va.
+      //
+      // El nombre del peldano se asigna cuando el canvas DIBUJA por primera vez,
+      // no cuando aparece: el modulo de Duo se instancia al boot para que su
+      // sprite se vaya decodificando (fix-reward-fx-static-and-duo-crash) y su
+      // canvas esta en el DOM, vacio, mucho antes de que el boton dispare el
+      // Super. Nombrear por aparicion mezclaria los tres efectos.
+      var labels = new WeakMap(), order = [], acc = {}, n = 0, swapped = false;
+      var step = function () {
+        window.__frames(1);
+        var cs = document.querySelectorAll('body > canvas');
+        for (var i = 0; i < cs.length; i++) {
+          var el = cs[i];
+          var m = maskOf(el);
+          if (!labels.has(el) && m.ink > 0) {
+            labels.set(el, FX_TIERS[order.length] || ('extra' + order.length));
+            order.push(labels.get(el));
+          }
+          if (!labels.has(el)) continue;
+          var tier = labels.get(el);
+          if (!acc[tier]) acc[tier] = { tier: tier, series: [], bits: [], compsMax: 0, inkMax: 0, first: null, last: null };
+          var s = acc[tier];
+          if (m.ink > 0) {
+            if (s.first === null) s.first = window.__perf;
+            s.last = window.__perf;
+            s.bits.push(m.bits);
+            s.series.push([m.comps, m.ink, window.__perf]);
+            if (m.comps > s.compsMax) s.compsMax = m.comps;
+            if (m.ink > s.inkMax) s.inkMax = m.ink;
+            // El re-render entra con el primer efecto ya visible: ahi se prueba
+            // si un efecto en vuelo sobrevive a que la barra se vaya y vuelva.
+            if (!swapped) {
+              swapped = true;
+              report.fxBarSwapT = window.__perf;
+              report.fxBarSwapTier = tier;
+              var guardado = detachHeader();
+              report.fxBarSwapOk = !!guardado;
+              setTimeout(function () { reattachHeader(guardado); }, 0);
+            }
+          }
+        }
+        if (++n < iters) { setTimeout(step, 1); return; }
+        report.fx = order.map(function (tier) {
+          var s = acc[tier];
+          // La ventana va del 40% al 55% de la vida visible: el nucleo de la
+          // meseta. Afuera quedan la entrada (los cristales crecen 700ms, las
+          // llamas 180ms) y el desvanecido de salida, que en el Duo encoge a los
+          // sprites: un encogimiento tambien cuenta como cambio de forma.
+          var span = s.first === null ? 0 : (s.last - s.first);
+          var from = s.first + span * 0.4, to = s.first + span * 0.55;
+          var first = -1, last = -1, midFrames = 0, compsMaxMid = 0;
+          for (var k = 0; k < s.series.length; k++) {
+            if (s.series[k][2] < from || s.series[k][2] > to) continue;
+            if (first < 0) first = k;
+            last = k; midFrames++;
+            if (s.series[k][0] > compsMaxMid) compsMaxMid = s.series[k][0];
+          }
+          // Cambio de forma entre el primer y el ultimo instante de la meseta:
+          // pixeles que estaban en la mascara y ya no, al reves, sobre el area
+          // mayor. Es la medida de "¿se movio la figura?" que no se engaña con un
+          // desvanecido (uniforme) ni con un agregado de muchos elementos que se
+          // mueven en direcciones opuestas y se cancelan en el centroide.
+          var changed = null;
+          if (first >= 0 && last > first) {
+            var a = s.bits[first], b = s.bits[last], diff = 0;
+            for (var z = 0; z < a.length; z++) {
+              var v = a[z] ^ b[z];
+              while (v) { v &= v - 1; diff++; }
+            }
+            var area = Math.max(s.series[first][1], s.series[last][1]) * (PROBE_W * PROBE_H);
+            changed = area > 0 ? diff / area : null;
+          }
+          // fix-reward-fx-killed-by-transient-bar-loss: lo que pasó DESPUES del
+          // re-render de la barra, en el mismo canvas. Si el script lo destruyo,
+          // el canvas se va del DOM y no queda ni una muestra mas: eso es
+          // justamente lo que hay que atrapar.
+          var swapT = report.fxBarSwapT;
+          var postFirst = -1, postLast = -1, postFrames = 0;
+          if (swapT) {
+            for (var w = 0; w < s.series.length; w++) {
+              if (s.series[w][2] < swapT) continue;
+              if (postFirst < 0) postFirst = w;
+              postLast = w; postFrames++;
+            }
+          }
+          var postChange = null;
+          if (postFirst >= 0 && postLast > postFirst) {
+            var a2 = s.bits[postFirst], b2 = s.bits[postLast], diff2 = 0;
+            for (var y = 0; y < a2.length; y++) {
+              var v2 = a2[y] ^ b2[y];
+              while (v2) { v2 &= v2 - 1; diff2++; }
+            }
+            var area2 = Math.max(s.series[postFirst][1], s.series[postLast][1]) * (PROBE_W * PROBE_H);
+            postChange = area2 > 0 ? diff2 / area2 : null;
+          }
+          return {
+            tier: tier,
+            visibleMs: span,
+            frames: s.series.length,
+            steadyFrames: midFrames,
+            shapeChange: changed,
+            maxComps: s.compsMax,
+            compsMid: compsMaxMid,
+            ink: s.inkMax,
+            afterSwapFrames: postFrames,
+            afterSwapChange: postChange,
+          };
+        });
+        resolve();
+      };
+      setTimeout(step, 1);
+    });
+  }
+
+  // El snapshot no compite con el sondeo de la barra del script: el engranaje
+  // aparece en el init(), pero el riel recien en el primer ensureRoots() exitoso
+  // (sondeo cada 500ms). Con un unico setTimeout fijo, una corrida lenta
+  // publicaba el reporte temprano con la leccion todavia sin riel y fallaba
+  // veinte aserciones sin que hubiera un bug. Se espera al riel, con techo.
+  function cuandoEsteListo(cb) {
+    var intentos = 0;
+    (function poll() {
+      if (document.querySelector('.adhd-rail-label') || ++intentos > 30) { cb(); return; }
+      setTimeout(poll, 100);
+    })();
+  }
+
+  // fix-reward-fx-killed-by-transient-bar-loss: el fin de vida REAL tiene que
+  // seguir limpiando. Se dispara un efecto, se navega con el efecto en vuelo y se
+  // comprueba que no queda ningun canvas. Va al final de la cadena porque el
+  // cambio de pathname deshace el overlay y las aserciones del riel ya corrieron.
+  function countFxCanvases() {
+    return [...document.querySelectorAll('body > canvas')].filter(c => c.width > 10).length;
+  }
+  function pumpFor(iters) {
+    var chain = Promise.resolve();
+    for (var i = 0; i < iters; i++) {
+      chain = chain.then(function () { return new Promise(function (r) { setTimeout(r, 1); }); })
+                   .then(function () { window.__frames(1); });
+    }
+    return chain;
+  }
+  function navCleansUp() {
+    // fix-reward-fx-killed-by-transient-bar-loss: el otro lado del arreglo. Un fin
+    // de vida real tiene que seguir limpiando, o la suite se podria satisfacer con
+    // "nunca destruyo nada".
+    //
+    // Se dispara un efecto y se navega en el PRIMER frame en que dibuja: misma
+    // autosincronizacion que el re-render, para no depender de la agenda en
+    // milisegundos. Tope de iteraciones y finish() en todas las salidas: sin eso
+    // una salida temprana dejaba el <pre> con el reporte temprano y el runner no
+    // veia diferencia entre "no corrio" y "no encontro nada".
+    return new Promise(function (resolve) {
+     try {
+      report.navStarted = true;
+      var gear = document.querySelector('.adhd-btn');
+      var btn = document.querySelector('#adhd-test-fx');
+      if (btn) { arrancar(); return; }
+      if (gear) gear.click();                       // el panel se reabre si hace falta
+      var intentos = 0;
+      (function esperarPanel() {
+        btn = document.querySelector('#adhd-test-fx');
+        if (btn) { arrancar(); return; }
+        if (++intentos > 40) { report.navSinBoton = true; finish(); resolve(); return; }
+        setTimeout(esperarPanel, 50);
+      })();
+
+      function arrancar() {
+        report.navBtn = true;
+        btn.click();
+        var conTinta = function () {
+          // Se mide el canvas ENTERO (reducido al probe), no una esquina: el
+          // layout de los efectos deja margenes, asi que la esquina superior
+          // izquierda esta vacia y una lectura ahi nunca ve tinta.
+          var yes = 0;
+          document.querySelectorAll('body > canvas').forEach(function (c) {
+            if (c.width > 10 && inkOf(c) > 0) yes++;
+          });
+          return yes;
+        };
+        var navegado = false, n = 0;
+        var step = function () {
+          window.__frames(1);
+          if (!navegado && conTinta() > 0) {
+            report.navBeforeCanvases = countFxCanvases();
+            history.pushState({}, '', '/not-a-lesson/x');
+            document.body.appendChild(document.createElement('span'));  // el observer mira el path al ver una mutacion
+            report.navPath = location.pathname;
+            navegado = true;
+            n = 0;          // el reloj se reinicia ACÁ: el observer corre en un
+                            // microtask, asi que medir en la misma vuelta daria
+                            // el estado de antes del teardown.
+          }
+          if (navegado && n > 900) {            // ~1.4s de efecto: margenismo
+            report.navAfterCanvases = countFxCanvases();
+            report.navCrono = !!document.querySelector('.adhd-mini-crono');
+            report.navRail = !!document.querySelector('.adhd-decay-timeline');
+            finish(); resolve(); return;
+          }
+          if (++n > 12000) {                     // el efecto no apareció nunca
+            report.navTimeout = true;
+            report.navAfterCanvases = countFxCanvases();
+            finish(); resolve(); return;
+          }
+          setTimeout(step, 1);
+        };
+        setTimeout(step, 1);
+      }
+     } catch (e) {
+      report.navError = String((e && e.message) || e) + ' @ ' + String((e && e.stack || '').slice(0, 200));
+      finish();
+      resolve();
+     }
+    });
+  }
+
+  cuandoEsteListo(function () {
     report = snapshot();
     report.barFound = report.overlay;
     finish();                                   // reporte temprano: el runner ya ve algo
     if (!report.rail) return;                   // path que no es leccion
 
+    // fix-reward-fx-killed-by-transient-bar-loss: la ruta de fin de vida real
+    // corre SOLO esa fase, y fuera de la cadena de promesas: el dump por
+    // presupuesto de tiempo virtual puede caer entre el ultimo finish() y el
+    // siguiente microtask, y con la cadena dentro la fase no llegaba a correr.
+    if (location.pathname.indexOf('navonly') !== -1) {
+      // Directo, sin temporizador de arranque: con un setTimeout(800) el dump
+      // por tiempo virtual se comia la fase (los timers de 50 y 400ms llegaban y
+      // el de 800 no). La fase se bombea sola con su propio bucle de 1ms.
+      navCleansUp();
+      return;
+    }
+
     var GOAL = __GOAL__ * 1000;
     report.goalMs = GOAL;
 
-    tierSamples().then(function (first) {
+    staleFrameCheck()
+      .then(function () {
+        // 6 peldanios x 1400ms de agenda del boton + margen. El arnes bombea un
+        // frame por cada 1ms de tiempo virtual del browser, asi que 9000 pasos
+        // cubren el ciclo completo con los tres efectos dentro.
+        return samplePanelEffects(9000);
+      })
+      .then(function () { report.fxReady = true; finish(); })
+      .then(function () { return tierSamples(); })
+      .then(function (first) {
       report.laps.push({
         lap: 0,
         label: first[0].label,
@@ -205,13 +682,15 @@
         })(i);
       }
       return chain;
-    }).then(finish).catch(function (e) {
+    }).then(navCleansUp).then(finish).catch(function (e) {
       // Nunca dejar al runner sin reporte: si la cadena falla, se dice por que.
       if (typeof report === 'undefined' || !report) report = snapshot();
-      report.errors = (report.errors || []).concat('CHAIN: ' + (e && e.message || e));
+      // OJO: finish() reescribe report.errors con window.__errors, asi que un
+      // error de la cadena guardado ahi se perdia. Va en su propio campo.
+      report.chainError = String((e && e.message) || e);
       finish();
     });
-  }, 600);
+  });
 
   // Se escribe progresivamente: si la cadena se traba, el runner igual ve hasta
   // donde llego en vez de "no hay reporte".

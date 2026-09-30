@@ -58,7 +58,9 @@ const MUTATORS = [
   c => firstReplace(c, /if \(level === 'always'\) return false;/, '', "resolveMotion: 'always' cae al sistema (rama borrada)"),
   c => firstReplace(c, /return !!systemReduced;/, 'return !systemReduced;', "resolveMotion: fallback invertido"),
   c => firstReplace(c, /return !!systemReduced;/, 'return systemReduced;', "resolveMotion: sin coercion a booleano"),
-  c => firstReplace(c, /motionLevel: 'system',/, "motionLevel: 'never',", "DEFAULTS.motionLevel 'system' \u2192 'never'"),
+  // motion-default-always: el default paso a 'always'. Un mutador que no matchea es
+  // un SKIP y los SKIPs tapan un patron rancio (ver el README del harness).
+  c => firstReplace(c, /motionLevel: 'always',/, "motionLevel: 'never',", "DEFAULTS.motionLevel 'always' \u2192 'never'"),
 ];
 
 // ---------- correr los tests contra el SRC actual ----------

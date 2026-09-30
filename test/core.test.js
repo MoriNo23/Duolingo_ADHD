@@ -226,14 +226,21 @@ describe('DEFAULTS', () => {
     assert.equal(C.LOST, undefined);              // no hay estado de derrota
     // animations-panel-setting: el default tiene que ser 'system' para que un
     // config guardado antes del cambio no cambie de comportamiento.
-    assert.equal(C.DEFAULTS.motionLevel, 'system');
+    // motion-default-always: el default es 'always'. Con 'system', un escritorio
+    // que reporta prefers-reduced-motion dejaba las celebraciones quietas.
+    assert.equal(C.DEFAULTS.motionLevel, 'always');
     assert.deepEqual(C.MOTION_LEVELS, ['system', 'always', 'never']);
   });
 
-  test('un config guardado sin motionLevel cae en system tras el merge', () => {
+  test('un config guardado sin motionLevel cae en always tras el merge', () => {
+    // motion-default-always: sin nivel guardado, el default es 'always'.
     const cfgViejo = { separators: 4, lang: 'en', timerMode: true };
     const merged = Object.assign({}, C.DEFAULTS, cfgViejo);
-    assert.equal(merged.motionLevel, 'system');
+    assert.equal(merged.motionLevel, 'always');
+    // Y un nivel YA guardado gana: el default nuevo no pisa una eleccion previa.
+    const conNivel = Object.assign({}, C.DEFAULTS, { lang: 'es', motionLevel: 'never' });
+    assert.equal(conNivel.motionLevel, 'never');
+    assert.equal(C.resolveMotion(conNivel.motionLevel, false), true);
   });
 });
 
@@ -529,16 +536,19 @@ describe('animations-panel-setting: la clase del body va atada a la resolucion',
       'la clase tiene que alternarse en un solo lugar del archivo');
   });
 
-  test('con el default system y sin preferencia del sistema, la clase NO se aplica', () => {
-    // Reproduce el arranque real: DEFAULTS + resolveMotion.
-    const off = C.resolveMotion(C.DEFAULTS.motionLevel, false);
-    assert.equal(off, false, 'sin preferencia del sistema, el default no apaga nada');
+  test('con el default always la clase NO se aplica ni con reduce del sistema', () => {
+    // motion-default-always: es el arranque real (DEFAULTS + resolveMotion) y
+    // es el caso de esta maquina (enable-animations=false en KDE): la clase no
+    // lleva el kill switch porque el default es 'always'. Para apagarlas: nivel
+    // 'system' (que ademas es lo que la spec nueva describe) o 'never'.
+    assert.equal(C.resolveMotion(C.DEFAULTS.motionLevel, false), false);
+    assert.equal(C.resolveMotion(C.DEFAULTS.motionLevel, true), false);
   });
 
-  test('con el default system y el sistema pidiendo reduce, la clase SI se aplica', () => {
-    // Esta es la maquina del usuario: enable-animations=false en KDE.
-    const off = C.resolveMotion(C.DEFAULTS.motionLevel, true);
-    assert.equal(off, true);
+  test('con nivel system y reduce del sistema, la clase SI se aplica', () => {
+    // El camino calmado sigue entero: solo hay que elegirlo.
+    assert.equal(C.resolveMotion('system', true), true);
+    assert.equal(C.resolveMotion('system', false), false);
   });
 });
 
@@ -600,16 +610,115 @@ describe('animations-panel-setting: el control esta en el panel', () => {
     assert.equal(iAplica < iSondeo, true, 'aplicarMotion deberia ir antes del primer render');
   });
 
+  test('perder la barra un instante NO tira abajo lo que esta corriendo', () => {
+    // fix-reward-fx-killed-by-transient-bar-loss. Un solo batch de mutaciones sin
+    // barra mataba el efecto en vuelo, el cronometro y el riel. La rama del
+    // observer tiene que pasar por el periodo de gracia, y la navegacion NO: un
+    // cambio de path es respuesta definitiva.
+    const mo = src.slice(src.indexOf('const mo = new MutationObserver('),
+                         src.indexOf('mo.observe(document.body'))
+      // sin comentarios: la nota del fix menciona el teardown viejo a proposito
+      .replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+    assert.ok(mo.length > 0, 'no se encontro el observer');
+    assert.equal(/if \(!bar\)\s*{[\s\S]*onBarMissing\(\)/.test(mo), true,
+      'la rama sin barra tiene que pasar por onBarMissing()');
+    assert.equal(/if \(!bar\)\s*{[\s\S]*?teardownTimerFx\(\)/.test(mo), false,
+      'la rama sin barra vuelve a tearing down directo: eso es el bug');
+    assert.equal(/if \(bar\) clearBarMissing\(\)/.test(mo), true,
+      'encontrar la barra tiene que limpiar el estado de gracia');
+
+    const grace = src.slice(src.indexOf('function onBarMissing()'),
+                            src.indexOf('function onBarMissing()') + 500);
+    assert.ok(grace.length > 0, 'no se encontro onBarMissing()');
+    assert.equal(/setTimeout\(/.test(grace), true,
+      'la gracia tiene que ser un timer: un observer no vence con la pagina quieta');
+    assert.equal(/ensureRoots\(\)/.test(grace), true,
+      'la gracia tiene que volver a preguntar por la barra');
+    assert.equal(/teardownTimerFx\(\)/.test(grace), true,
+      'si la barra no vuelve, ahi si es fin de vida');
+
+    // El teardown tiene que limpiar la gracia, si no el timer re-pregunta sobre
+    // un estado ya deshecho.
+    const td = src.slice(src.indexOf('function teardownTimerFx()'),
+                         src.indexOf('function teardownTimerFx()') + 400);
+    assert.equal(/clearBarMissing\(\)/.test(td), true, 'teardownTimerFx no limpia la gracia');
+
+    // La navegacion sigue siendo inmediata.
+    const wp = src.slice(src.indexOf('const watchPath'), src.indexOf('const watchPath') + 500);
+    assert.ok(/teardownTimerFx\(\)/.test(wp), 'la navegacion tiene que tearing down');
+    assert.equal(/onBarMissing|clearBarMissing/.test(wp), false,
+      'la navegacion no pasa por la gracia: un cambio de path es definitivo');
+  });
+
   test('los 3 modulos canvas reciben el valor efectivo, no leen matchMedia solos', () => {
-    // fxOpts() centraliza respectReducedMotion. Si un modulo vuelve a leer
-    // matchMedia por su cuenta, el override del usuario deja de aplicarle.
-    assert.equal(/const fxOpts = \(\) => \(\{/.test(src), true, 'falta fxOpts()');
-    const cuerpo = src.slice(src.indexOf('const fxOpts'), src.indexOf('const fxOpts') + 500);
+    // fix-reward-fx-static-and-duo-crash: fxOpts() centraliza la decision de
+    // calma y la pasa como `reduced`. La version anterior pasaba
+    // `respectReducedMotion`, que cada modulo AND-eaba con su propia consulta a
+    // matchMedia: con el nivel 'never' y un sistema sin preferencia, el override
+    // del usuario se perdia y los canvas se animaban igual que el CSS apagado.
+    assert.equal(/const fxOpts = \(\) => \{/.test(src), true, 'falta fxOpts()');
+    const i = src.indexOf('const fxOpts');
+    const cuerpo = src.slice(i, src.indexOf('const FX_BY_RUNG', i));
     for (const m of ['StreakFlames', 'CrystalReward', 'DuoReward']) {
-      assert.equal(new RegExp(m + ': \\{[^}]*respectReducedMotion: motionOff\\(\\)').test(cuerpo), true,
+      assert.equal(new RegExp(m + ': \\{ reduced: calm').test(cuerpo), true,
         m + ' no recibe el valor efectivo');
     }
     assert.equal(/new Ctor\(FX_OPTS\[/.test(src), false, 'fxInstance todavia usa la constante vieja');
+  });
+
+  test('ningun modulo vuelve a leer la preferencia del sistema', () => {
+    // La decision de calma tiene UNA sola fuente (motionOff). Si un modulo
+    // vuelve a consultar matchMedia, el override explícito del usuario puede
+    // volver a perderse en la direccion que falló.
+    const desde = src.indexOf('/* >>> streak-flames.js');
+    const hasta = src.indexOf('/* <<< fin duo-reward.js');
+    assert.ok(desde > -1 && hasta > desde, 'no se encontro el bloque de los 3 modulos');
+    // Sin comentarios: las notas locales mencionan la opcion vieja a proposito.
+    const modulos = src.slice(desde, hasta).replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+    assert.equal(/matchMedia/.test(modulos), false,
+      'un modulo consulta matchMedia: la decision de calma deja de ser unica');
+    assert.equal(/respectReducedMotion/.test(modulos), false,
+      'quedo la opcion vieja, que el modulo combinaba con AND');
+  });
+
+  test('la variante calmada es mas chica y mas corta, no la misma composicion quieta', () => {
+    // Con solo `reduced` los tres efectos quedaban como una foto fija a pantalla
+    // completa durante 6s, indistinguible de un efecto roto. Ademas de la calma,
+    // count y duration bajan.
+    const i = src.indexOf('const fxOpts');
+    const cuerpo = src.slice(i, src.indexOf('const FX_BY_RUNG', i));
+    // El piso de duration NO es el mismo en los tres: playRewardFx destruye la
+    // instancia con inst.duration + 400ms, asi que una duracion calmada por
+    // debajo de la que el modulo really usa mataria el efecto a mitad de camino.
+    // Los pisos estan en el modulo (Math.max(1500, duration) en llamas y
+    // cristales; life = 700 cuando reduced en Duo).
+    const PISOS = { StreakFlames: 1500, CrystalReward: 1500, DuoReward: 700 };
+    for (const m of ['StreakFlames', 'CrystalReward', 'DuoReward']) {
+      const linea = cuerpo.match(new RegExp(m + ': \\{[^}]*\\}'));
+      assert.ok(linea, m + ' no tiene juego de opciones');
+      assert.equal(/count: calm \? \d+ : \d+/.test(linea[0]), true, m + ' no achica count en modo calmado');
+      const dur = linea[0].match(/duration: calm \? (\d+) : (\d+)/);
+      assert.ok(dur, m + ' no acorta duration en modo calmado');
+      assert.ok(+dur[1] >= PISOS[m], m + ': la duracion calmada (' + dur[1] + ') queda bajo el piso del modulo (' + PISOS[m] + ')');
+      assert.ok(+dur[1] < +dur[2], m + ': la duracion calmada no es mas corta que la animada');
+    }
+  });
+
+  test('el tiempo de un efecto nunca es negativo', () => {
+    // El timestamp del frame es el instante en que el frame empezo, asi que un
+    // burst disparado desde una tarea puede recibir un frame mas viejo que el.
+    // Sin clampar, ease() devuelve negativo, el radio de la onda de choque se
+    // vuelve negativo y Chromium tira IndexSizeError dentro del callback: la
+    // reposicion del frame siguiente no ocurre y el efecto muere.
+    const desde = src.indexOf('/* >>> streak-flames.js');
+    const hasta = src.indexOf('/* <<< fin duo-reward.js');
+    const modulos = src.slice(desde, hasta);
+    const clampa = modulos.match(/Math\.max\(0,\s*now\s*-\s*[a-z]+\.start\)/g) || [];
+    assert.ok(clampa.length >= 3, 'los 3 efectos tienen que clampar el tiempo transcurrido: ' + clampa.length);
+    // Y un frame que no se puede dibujar no puede cortar el efecto: el pedido del
+    // siguiente frame va en un finally.
+    const finallys = modulos.match(/finally\s*\{/g) || [];
+    assert.ok(finallys.length >= 3, 'los 3 efectos tienen que reposicionar el frame en un finally: ' + finallys.length);
   });
 });
 

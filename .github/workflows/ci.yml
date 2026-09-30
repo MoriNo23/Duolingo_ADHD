@@ -61,3 +61,10 @@ jobs:
       # CSSOM, microtask del MutationObserver, geometria del detector de barra).
       - name: browser (e2e)
         run: npm run test:e2e
+
+      # Capa 4: los tres modulos de terceros viven inline con parches locales.
+      # El paso imprime la divergencia contra los zips de referencia y falla si
+      # crece mas alla del presupuesto: una edicion a mano de codigo vendorizado
+      # tiene que quedar visible, no pasar por el filtro de "es codigo de otro".
+      - name: vendor diff (modulos de terceros)
+        run: test/vendor-diff.sh

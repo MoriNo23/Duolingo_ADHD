@@ -23,6 +23,20 @@ const PUBLISHED = path.join(ROOT, 'duolingo-adhd.user.js');
 const FIXTURE = path.join(__dirname, 'fixture.html');
 const GOAL_SEC = 6; // objetivo del temporizador: corto, para que las vueltas pasen
 
+// fix-reward-fx-static-and-duo-crash: las rutas que miden los efectos de
+// recompensa sobre el canvas. Las dos 'calm' tienen que quedar quietas de verdad:
+// una por la preferencia del sistema (el caso real del usuario) y otra por el
+// override explicito 'never' (que antes no calmaba los canvas, solo el CSS).
+const ROUTES = [
+  { path: '/lesson/', expectLesson: true, kind: 'animated' },
+  { path: '/lesson/calm-system/', expectLesson: true, kind: 'calm' },
+  { path: '/lesson/calm-never/', expectLesson: true, kind: 'calm' },
+  // Ruta aparte para el fin de vida real: el cambio de pathname destruye el riel,
+  // asi que mezclarlo con el recorrido de vueltas no puede dar una lectura clara.
+  { path: '/lesson/navonly/', expectLesson: true, kind: 'animated', navOnly: true },
+  { path: '/not-a-lesson/x', expectLesson: false, kind: 'none' },
+];
+
 // ---------- browsers disponibles, en orden de preferencia ----------
 function findBrowser() {
   const env = process.env.CHROME_BIN || process.env.CHROMIUM_BIN;
@@ -51,14 +65,14 @@ function serve() {
       res.writeHead(200, { 'content-type': type });
       res.end(fs.readFileSync(file));
     };
-    if (path_ === '/lesson/' || path_ === '/lesson') {
-      // El fixture se genera con el script inyectado inline (ver buildFixture).
-      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
-      return res.end(buildFixture('/lesson/'));
-    }
-    if (path_.startsWith('/not-a-lesson')) {
-      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
-      return res.end(buildFixture('/not-a-lesson/x'));
+    // El fixture se genera con el script inyectado inline (ver buildFixture).
+    // El pathname decide el nivel sembrado y si la preferencia del sistema va
+    // simulada, asi que cada ruta se sirve desde su propio path.
+    for (const r of ROUTES) {
+      if (path_ === r.path || path_ === r.path.replace(/\/$/, '')) {
+        res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+        return res.end(buildFixture(r.path));
+      }
     }
     if (path_ === '/duolingo-adhd.user.js') {
       return send(PUBLISHED, 'text/javascript; charset=utf-8');
@@ -95,7 +109,10 @@ function runBrowser(bin, url) {
   return new Promise((resolve, reject) => {
     const args = [
       '--headless=new', '--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage',
-      '--virtual-time-budget=30000', '--dump-dom', url,
+      // fix-reward-fx-static-and-duo-crash: el muestreo de efectos avanza un
+      // frame por cada 1ms de tiempo virtual (el boton del panel agenda los tres
+      // peldanios cada 1400ms), asi que el presupuesto tiene que holgar.
+      '--virtual-time-budget=400000', '--dump-dom', url,
     ];
     const p = spawn(bin, args, { stdio: ['ignore', 'pipe', 'pipe'] });
     let out = '';
@@ -119,7 +136,7 @@ function assert(results, name, cond, detail) {
   results.push({ name, pass: !!cond, detail: detail === undefined ? '' : String(detail) });
 }
 
-function checkReport(rep, results, { expectLesson }) {
+function checkReport(rep, results, { expectLesson, kind = 'none', navOnly = false }) {
   if (!rep || rep.parseError) {
     assert(results, 'el fixture produjo un reporte', false,
       rep ? 'JSON ilegible: ' + rep.parseError : 'no se encontro el <pre id="adhd-e2e-report">');
@@ -146,9 +163,9 @@ function checkReport(rep, results, { expectLesson }) {
     // animations-panel-setting: el override 'always' gana contra el
     // prefers-reduced-motion del harness. El control del panel se prueba en
     // el core contra el fuente publicado; aca se prueba el efecto real.
-    assert(results, "con motionLevel 'always' el body NO queda con motion-off",
-      rep.motionOffClass === false,
-      'sembrado=' + rep.motionSeeded + ' clase=' + rep.motionOffClass);
+    assert(results, `con motionLevel '${rep.motionSeeded}' la clase motion-off es la esperada`,
+      rep.motionOffClass === (kind === 'animated' ? false : true),
+      'sembrado=' + rep.motionSeeded + ' clase=' + rep.motionOffClass + ' rm=' + rep.rmReduce);
     assert(results, 'la etiqueta del riel nombra un peldaño real',
       ['MADERA', 'BRONCE', 'PLATA', 'RACHA', 'DIAMANTE', 'SUPER'].includes(rep.railLabel),
       rep.railLabel);
@@ -157,26 +174,98 @@ function checkReport(rep, results, { expectLesson }) {
       rep.railTitle);
 
     // --- el reloj de la escalera, la parte que fallo dos veces ---
-    const l = rep.laps || [];
+    const l = navOnly ? [] : (rep.laps || []);
     const first = l[0] || {}, second = l[1] || {}, deep = l[l.length - 1] || {};
-    assert(results, 'dentro de una vuelta el material del fill NO cambia',
+    if (!navOnly) assert(results, 'dentro de una vuelta el material del fill NO cambia',
       Array.isArray(first.materials) && first.materials.every((m) => m === first.materials[0]),
       JSON.stringify(first.materials));
-    assert(results, 'dentro de una vuelta la etiqueta NO cambia',
+    if (!navOnly) assert(results, 'dentro de una vuelta la etiqueta NO cambia',
       Array.isArray(first.labels) && first.labels.every((x) => x === first.labels[0]),
       JSON.stringify(first.labels));
-    assert(results, 'la recarga baja EXACTAMENTE un peldaño',
+    if (!navOnly) assert(results, 'la recarga baja EXACTAMENTE un peldaño',
       typeof second.label === 'string' && typeof first.label === 'string' &&
       second.label !== first.label,
       first.label + ' -> ' + second.label);
-    assert(results, 'el piso es MADERA y no se agota',
+    if (!navOnly) assert(results, 'el piso es MADERA y no se agota',
       deep.label === 'MADERA' && deep.lost === false,
       'laps=' + l.length + ' label=' + deep.label);
-    assert(results, 'nunca aparece un estado de derrota en ninguna vuelta',
+    if (!navOnly) assert(results, 'nunca aparece un estado de derrota en ninguna vuelta',
       l.every((x) => x.label !== 'PERDIDO' && x.lost === false && !/perdido|afafaf/i.test(x.material || '')),
       JSON.stringify(l.map((x) => x.label)));
-    assert(results, 'el marcador de vuelta sigue contando en el piso',
+    if (!navOnly) assert(results, 'el marcador de vuelta sigue contando en el piso',
       typeof deep.lapMark === 'number' && deep.lapMark >= 6, 'lapMark=' + deep.lapMark);
+
+    // --- efectos de recompensa: movimiento real del canvas, no la clase ---
+    // fix-reward-fx-static-and-duo-crash. Un burst disparado desde una tarea
+    // puede recibir su primer frame con un timestamp mas viejo que el reloj (el
+    // frame que lo entrega ya estaba en curso). Ese frame tiene que ser valido
+    // y el efecto tiene que seguir: si un frame no se puede dibujar, la
+    // excepcion no lo puede matar.
+    // En la ruta navonly no se corre la fase de efectos: solo el fin de vida.
+    if (!navOnly) {
+    const stale = Array.isArray(rep.fxStaleFrame) ? rep.fxStaleFrame : [];
+    for (const tier of ['racha', 'diamante', 'super']) {
+      const s = stale.find((x) => x.name === tier) || {};
+      assert(results, `el burst con frame viejo no rompe el efecto de ${tier}`,
+        !s.missing && (s.newErrors || []).length === 0 && s.stillScheduled === true && s.inkAfter > 0,
+        'errores=' + JSON.stringify(s.newErrors) + ' sigue=' + s.stillScheduled + ' tinta=' + s.inkAfter);
+    }
+    assert(results, 'el muestreo de efectos termino', rep.fxReady === true,
+      'fxReady=' + rep.fxReady);
+    const fx = Array.isArray(rep.fx) ? rep.fx : [];
+    // El panel tiene que explicar una celebracion calmada que vino del sistema:
+    // si no lo hace, el usuario ve una pared de figuras quietas y no tiene donde
+    // mirar. Solo aplica con el nivel en 'system' y el sistema pidiendo calma.
+    const hintEsperado = rep.motionSeeded === 'system' && rep.rmReduce === true;
+    assert(results, 'el panel explica la calma que pidio el sistema',
+      rep.motionSystemHint === hintEsperado,
+      'nivel=' + rep.motionSeeded + ' rm=' + rep.rmReduce + ' hint=' + rep.motionSystemHint);
+
+    // fix-reward-fx-killed-by-transient-bar-loss: un re-render de la fila de la
+    // leccion (que Duolingo hace al responder) NO puede matar un efecto en vuelo.
+    assert(results, 'el harness re-rendro la barra con un efecto en pantalla',
+      rep.fxBarSwapOk === true, 'swap=' + rep.fxBarSwapOk);
+    for (const tier of ['racha', 'diamante', 'super']) {
+      const f = fx.find((x) => x.tier === tier) || {};
+      const enVuelo = tier === rep.fxBarSwapTier;
+      if (kind === 'animated' && enVuelo) {
+        // El caso critico: el efecto que estaba en pantalla cuando la barra se
+        // fue tiene que seguir dibujando, no quedar congelado en un frame.
+        assert(results, `el efecto de ${tier} sigue animandose despues del re-render de la barra`,
+          f.afterSwapFrames >= 3 && f.afterSwapChange >= 0.05,
+          'muestras=' + f.afterSwapFrames + ' cambio=' + f.afterSwapChange);
+      } else {
+        assert(results, `el efecto de ${tier} sobrevive al re-render de la barra`,
+          f.afterSwapFrames >= 3, 'muestras post swap=' + f.afterSwapFrames);
+      }
+    }
+    }
+    // Y el otro lado: un fin de vida real (cambio de path) tiene que seguir
+    // limpiando, o la suite se podria satisfacer con "nunca destruyo nada".
+    if (navOnly) {
+      assert(results, 'un cambio de path limpia los canvas de efecto igual',
+        rep.navBeforeCanvases >= 1 && rep.navAfterCanvases === 0,
+        'antes=' + rep.navBeforeCanvases + ' despues=' + rep.navAfterCanvases + ' path=' + rep.navPath + ' btn=' + rep.navBtn + ' crono=' + rep.navCrono + ' rail=' + rep.navRail);
+    }
+    if (!navOnly) {
+      const fx2 = Array.isArray(rep.fx) ? rep.fx : [];
+      for (const tier of ['racha', 'diamante', 'super']) {
+        const f = fx2.find((x) => x.tier === tier) || {};
+        // "¿Se movio la figura?": fraccion de la mascara que cambio entre el
+        // primer y el ultimo instante de la meseta. Un desvanecido no la cuenta y
+        // un monton de sprites que se mueven en direcciones opuestas tampoco (sus
+        // centroides se cancelarian).
+        if (kind === 'animated') {
+          assert(results, `el efecto de ${tier} se mueve cuando la animacion esta permitida`,
+            f.steadyFrames >= 3 && f.shapeChange >= 0.1,
+            'cambio de forma=' + f.shapeChange);
+        } else {
+          assert(results, `el efecto de ${tier} queda quieto cuando la animacion esta apagada`,
+            f.steadyFrames >= 3 && f.shapeChange <= 0.02,
+            'cambio de forma=' + f.shapeChange);
+        }
+      }
+    }
   } else {
     assert(results, 'fuera de una leccion NO hay overlay', rep.overlay === false);
     assert(results, 'fuera de una leccion NO hay segmentos', rep.segs === 0, rep.segs);
@@ -185,6 +274,31 @@ function checkReport(rep, results, { expectLesson }) {
     assert(results, "con motionLevel 'never' el body SI queda con motion-off, aun sin leccion",
       rep.motionOffClass === true,
       'sembrado=' + rep.motionSeeded + ' clase=' + rep.motionOffClass);
+  }
+}
+
+// fix-reward-fx-static-and-duo-crash: la variante calmada tiene que SER calmada,
+// no una foto fija a pantalla completa. Eso se mide contra la corrida animada:
+// mucho menos tiempo en pantalla, mucha menos tinta y ningun movimiento.
+function compareCalmVsAnimated(animated, calm, results, label) {
+  const a = (animated && animated.fx) || [];
+  const c = (calm && calm.fx) || [];
+  if (!a.length || !c.length) {
+    assert(results, `la variante calmada se pudo comparar (${label})`, false,
+      'animada=' + a.length + ' calma=' + c.length);
+    return;
+  }
+  for (const tier of ['racha', 'diamante', 'super']) {
+    const fa = a.find((x) => x.tier === tier) || {};
+    const fc = c.find((x) => x.tier === tier) || {};
+    const life = fa.visibleMs > 0 ? fc.visibleMs / fa.visibleMs : Infinity;
+    // Menos elementos, no menos area: con menos particulas el modulo agranda cada
+    // una (la base sale de la grilla), asi que el area cubierta casi no baja.
+    const comps = fa.maxComps > 0 ? fc.maxComps / fa.maxComps : Infinity;
+    assert(results, `la calma de ${tier} dura mucho menos que la animacion (${label})`,
+      life <= 0.4, 'visible=' + fc.visibleMs + 'ms vs ' + fa.visibleMs + 'ms (x' + life.toFixed(2) + ')');
+    assert(results, `la calma de ${tier} tiene muchos menos elementos (${label})`,
+      comps <= 0.5, 'elementos=' + fc.maxComps + ' vs ' + fa.maxComps + ' (x' + comps.toFixed(2) + ')');
   }
 }
 
@@ -197,12 +311,22 @@ async function main() {
   }
   const { server, port } = await serve();
   const results = [];
+  const reports = {};
   try {
-    const lessonDom = await runBrowser(bin, `http://127.0.0.1:${port}/lesson/`);
-    checkReport(extractReport(lessonDom), results, { expectLesson: true });
-
-    const otherDom = await runBrowser(bin, `http://127.0.0.1:${port}/not-a-lesson/x`);
-    checkReport(extractReport(otherDom), results, { expectLesson: false });
+    for (const r of ROUTES) {
+      const dom = await runBrowser(bin, `http://127.0.0.1:${port}${r.path}`);
+      const rep = extractReport(dom);
+      reports[r.path] = rep;
+      if (process.env.DEBUG_FX) {
+        const { laps, fx, fxStaleFrame, ...rest } = rep || {};
+        console.log('DEBUG', r.path, JSON.stringify(rest, null, 1));
+        console.log('DEBUG fx', JSON.stringify(fx));
+      }
+      checkReport(rep, results, r);
+    }
+    compareCalmVsAnimated(reports['/lesson/'], reports['/lesson/calm-system/'], results, 'reduce del sistema');
+    compareCalmVsAnimated(reports['/lesson/'], reports['/lesson/calm-never/'], results, 'nivel never');
+    // (la ruta navonly no corre la fase de efectos: no entra en las comparaciones)
   } finally {
     server.close();
   }

@@ -2,7 +2,7 @@
 // @name           Duolingo ADHD — Progress bar milestones (for the easily distracted / bored)
 // @name:es        Duolingo ADHD — Hitos de barra de progreso (para los que se aburren / se distraen)
 // @namespace      https://github.com/MoriNo23/duolingo-adhd
-// @version        2.14.0
+// @version        2.17.0
 // @description    Divide la barra de progreso de la lección en tramos. Modo tiempo: cada TRAMO arranca en el techo (Super) y cada vez que el riel se agota se recarga un peldaño más abajo (Super→Madera) — el peldaño de la vuelta en la que cierres el tramo es el que queda congelado. Cerrá rápido para congelar mejor jerarquía. Efectos de recompensa a pantalla completa en los peldaños altos (Racha/Diamante/Super), partículas, cronómetro Baloo 2, diario local + panel EN/ES. Mantiene el diseño nativo de Duolingo.
 // @description:en Splits the lesson progress bar into segments. Timer mode: every segment starts at the top tier (Super) and each time the rail runs out it recharges one tier lower (Super→Wood) — the tier of the lap you close the segment on is the one that gets frozen. Close fast to freeze a better tier. Full-screen reward effects on the high tiers (Streak/Diamond/Super), particles, Baloo 2 clock, local journal + EN/ES settings. Keeps Duolingo's native design.
 // @description:es Divide la barra de progreso de la lección en tramos. Modo tiempo: cada tramo arranca en el nivel Super y va bajando de peldaño (Madera→Super) mientras se quema el presupuesto — cerrá rápido para congelar mejor jerarquía. Efectos de recompensa a pantalla completa en los peldaños altos (Racha/Diamante/Super), partículas, cronómetro Baloo 2, diario local + panel EN/ES. Mantiene el diseño nativo de Duolingo.
@@ -83,9 +83,13 @@ const DEFAULTS = {
   timerSeconds: 0,        // segundos adicionales (0–59)
   timerShowLabel: true,   // efectos de recompensa al cerrar tramo (racha+)
   // animations-panel-setting: nivel de animacion del script.
-  // 'system' = respetar prefers-reduced-motion (default: no cambia nada para
-  // quien ya tenia el config guardado). 'always'/'never' = override explicito.
-  motionLevel: 'system',
+  // motion-default-always: el default es 'always'. Las celebraciones de recompensa son
+  // lo que el script existe para, y en un escritorio que reporta
+  // prefers-reduced-motion: reduce (org.gnome.desktop.interface enable-animations
+  // en false) el default anterior las dejaba quietas sin avisar. El camino calmado
+  // sigue a un click: 'system' = respetar la preferencia del escritorio, 'never' =
+  // apagarlas siempre. Un config que YA tiene nivel guardado lo conserva.
+  motionLevel: 'always',
   // rail-fixed-lap-ceiling: la clave `timerHardness` ya no se lee ni se escribe.
   // Sigue en DEFAULTS para que los cfgs guardados sigan cargando sin romper.
   timerHardness: 35,
@@ -136,7 +140,10 @@ const I18N = {
     jrNoData:        'Sin datos — activa el diario',
     // animations-panel-setting: nivel de animacion
     lblMotion:       'Animaciones',
-    hintMotion:      'Respeta la preferencia del sistema salvo que la cambies acá. Afecta solo a este script; no toca la configuracion del escritorio.',
+    hintMotion:      'Siempre = las anima siempre. Respetar sistema = lo decide tu escritorio. Nunca = las calma. Afecta solo a este script; no toca la configuracion del escritorio.',
+    // fix-reward-fx-static-and-duo-crash: el sistema pide calma y el usuario no
+    // dijo nada. Sin esto, una celebracion quieta parece un efecto roto.
+    hintMotionSystem: 'Tu sistema pide menos animacion, asi que las celebraciones de los peldanos altos (Racha, Diamante, Super) salen en version calmada: se ven, pero no se mueven. Poné Animaciones en "Siempre" para que se muevan.',
     motionSystem:    'Respetar sistema',
     motionAlways:    'Siempre',
     motionNever:     'Nunca',
@@ -177,7 +184,8 @@ const I18N = {
     jrNoData:        'No data — enable journal',
     // animations-panel-setting: motion level
     lblMotion:       'Animations',
-    hintMotion:      'Follows the system preference unless you change it here. Affects this script only; it does not change your desktop settings.',
+    hintMotion:      'Always = it animates regardless. Respect system = your desktop decides. Never = it stays calm. Affects this script only; it does not change your desktop settings.',
+    hintMotionSystem: 'Your system asks for reduced motion, so the high-tier celebrations (Streak, Diamond, Super) play their calm version: you see them, but they do not move. Set Animations to "Always" to make them move.',
     motionSystem:    'Respect system',
     motionAlways:    'Always',
     motionNever:     'Never',
@@ -575,12 +583,32 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
 //   Diamante-> crystal-reward.js  (CrystalReward)
 //   Super   -> duo-reward.js      (DuoReward)
 //
-// CODIGO DE TERCEROS: entra verbatim, no editar a mano. Cada modulo se expone
-// como clase en el isolated world del sandbox (window.<Clase>), que es lo que
-// necesita playRewardFx(). Nota de marca: el sprite de Duo es el personaje de
-// Duolingo recortado de una imagen aportada por el usuario; el repo es publico.
+// CODIGO DE TERCEROS: entra casi verbatim, con parches locales acotados y
+// marcados. Cada modulo se expone como clase en el isolated world del sandbox
+// (window.<Clase>), que es lo que necesita playRewardFx().
+//
+// Parches locales (fix-reward-fx-static-and-duo-crash), todos marcados en el
+// codigo con ese tag:
+//   1. La opcion es `reduced`, no `respectReducedMotion`. El modulo viejo la
+//      combinaba con AND contra su propia consulta a matchMedia, asi que el
+//      override 'never' del usuario se perdia en un sistema sin preferencia:
+//      el <body> quedaba calmado y el canvas se animaba igual.
+//   2. El tiempo transcurrido se clampa en 0 y el pedido del siguiente frame va
+//      en un finally. El timestamp de rAF es el instante en que el frame empezo:
+//      un burst disparado desde una tarea puede recibir un frame mas viejo que
+//      el, el radio de la onda de choque se volvia negativo y Chromium lanzaba
+//      IndexSizeError DENTRO del callback, sin reposicionar nunca el frame
+//      siguiente: el efecto moria en silencio.
+//   3. En Duo, la rotacion de los sprites y el pulso de las estrellas quedan bajo
+//      el flag de calma, para que la version calmada este de verdad quieta.
+//
+// El CI diffea los tres modulos contra los zips de referencia del repo
+// (streak-llamas.zip, diamantes-orbita.zip, animationFXSuper.zip) e imprime la
+// divergencia: la diferencia tiene que ser la de estos parches y nada mas.
+// Nota de marca: el sprite de Duo es el personaje de Duolingo recortado de una
+// imagen aportada por el usuario; el repo es publico.
 
-/* >>> streak-flames.js (llamas vectoriales (18, naranja/amarillo), peldaño Racha) — verbatim, no editar <<< */
+/* >>> streak-flames.js (llamas vectoriales (18; 4 en calma), naranja/amarillo, peldaño Racha) — vendored, parches locales <<< */
 /* StreakFlames — animated vector flames, transparent Canvas 2D */
 (()=>{
 'use strict';
@@ -640,9 +668,13 @@ function flame(ctx,width,time,seed=0,motion=1){
  ctx.restore();
 }
 class StreakFlames{
- constructor({canvas,count=18,duration=6000,respectReducedMotion=true}={}){
+ constructor({canvas,count=18,duration=6000,reduced=false}={}){
   this.canvas=canvas||document.createElement('canvas');this.owned=!canvas;this.count=count;this.duration=duration;this.frame=0;this.run=null;this.dead=false;
-  this.reduced=respectReducedMotion&&matchMedia('(prefers-reduced-motion: reduce)').matches;
+  // fix-reward-fx-static-and-duo-crash (parche local): la decision de calma la
+  // toma el script, que ya la resolvio para el <body> y para los tres modulos.
+  // Antes este modulo la Volvía a consultar con matchMedia y la combinaba con
+  // AND: el override 'never' del usuario se perdia en un sistema sin preferencia.
+  this.reduced=reduced===true;
   if(this.owned){Object.assign(this.canvas.style,{position:'fixed',inset:0,width:'100%',height:'100%',pointerEvents:'none',zIndex:9999,background:'transparent'});this.canvas.setAttribute('aria-hidden','true');document.body.appendChild(this.canvas);}
   this.ctx=this.canvas.getContext('2d',{alpha:true});this.resize=()=>{const b=this.canvas.getBoundingClientRect();this.w=b.width;this.h=b.height;const d=Math.min(devicePixelRatio||1,2);this.canvas.width=Math.round(b.width*d);this.canvas.height=Math.round(b.height*d);this.ctx.setTransform(d,0,0,d,0,0);};
   this.observer=new ResizeObserver(this.resize);this.observer.observe(this.canvas);this.resize();this.tick=this.tick.bind(this);
@@ -669,12 +701,18 @@ class StreakFlames{
   }
  }
  tick(now){
-  this.ctx.clearRect(0,0,this.w,this.h);const r=this.run;
-  if(!r||(!r.loop&&now-r.start>=r.duration)){this.frame=0;this.run=null;return;}
-  this.draw(r,now-r.start);
+  const r=this.run;
+  // fix-reward-fx-static-and-duo-crash (parche local): el timestamp del frame es
+  // el instante en que el frame empezo, asi que puede ser ANTERIOR al burst si
+  // el burst salio de una tarea de ese mismo frame. El tiempo transcurrido se
+  // clampa en 0 y el siguiente frame se agenda en un finally, para que un frame
+  // que no se puede dibujar no corte el efecto.
+  const ms=r?Math.max(0,now-r.start):0;
+  this.ctx.clearRect(0,0,this.w,this.h);
+  if(!r||(!r.loop&&ms>=r.duration)){this.frame=0;this.run=null;return;}
   // Static presentation for reduced motion in loop mode after the entrance.
-  if(this.reduced&&r.loop&&now-r.start>650){this.frame=0;return;}
-  this.frame=requestAnimationFrame(this.tick);
+  const still=this.reduced&&r.loop&&ms>650;
+  try{this.draw(r,ms);}finally{if(still)this.frame=0;else this.frame=requestAnimationFrame(this.tick);}
  }
  clear(){cancelAnimationFrame(this.frame);this.frame=0;this.run=null;this.ctx.clearRect(0,0,this.w,this.h);}
  destroy(){this.dead=true;this.clear();this.observer.disconnect();if(this.owned)this.canvas.remove();}
@@ -683,7 +721,7 @@ window.StreakFlames=StreakFlames;
 })();
 /* <<< fin streak-flames.js <<< */
 
-/* >>> crystal-reward.js (cristales 3D facetados (24, 33 vertices / 57 caras), peldaño Diamante) — verbatim, no editar <<< */
+/* >>> crystal-reward.js (cristales 3D facetados (24; 4 en calma, 33 vertices / 57 caras), peldaño Diamante) — vendored, parches locales <<< */
 /* CrystalReward: faceted 3D meshes rendered on a transparent 2D canvas. */
 (()=>{
 'use strict';
@@ -724,9 +762,11 @@ function crystal(ctx,size,ax,ay,az,time){
  ctx.restore();
 }
 class CrystalReward{
- constructor({canvas,count=24,duration=6800,respectReducedMotion=true}={}){
+ constructor({canvas,count=24,duration=6800,reduced=false}={}){
   this.owned=!canvas;this.canvas=canvas||document.createElement('canvas');this.count=count;this.duration=duration;this.frame=0;this.run=null;this.dead=false;
-  this.reduced=respectReducedMotion&&matchMedia('(prefers-reduced-motion: reduce)').matches;
+  // fix-reward-fx-static-and-duo-crash (parche local): ver StreakFlames. La
+  // decision de calma llega resuelta desde el script, no se re-deriva aca.
+  this.reduced=reduced===true;
   if(this.owned){Object.assign(this.canvas.style,{position:'fixed',inset:0,width:'100%',height:'100%',pointerEvents:'none',zIndex:9999,background:'transparent'});this.canvas.setAttribute('aria-hidden','true');document.body.appendChild(this.canvas);}
   this.ctx=this.canvas.getContext('2d',{alpha:true});this.resize=()=>{const b=this.canvas.getBoundingClientRect();this.w=b.width;this.h=b.height;const d=Math.min(devicePixelRatio||1,2);this.canvas.width=Math.round(b.width*d);this.canvas.height=Math.round(b.height*d);this.ctx.setTransform(d,0,0,d,0,0);};
   this.observer=new ResizeObserver(this.resize);this.observer.observe(this.canvas);this.resize();this.tick=this.tick.bind(this);
@@ -752,7 +792,13 @@ class CrystalReward{
    c.restore();
   }
  }
- tick(now){this.ctx.clearRect(0,0,this.w,this.h);const r=this.run;if(!r||(!r.loop&&now-r.start>=r.duration)){this.frame=0;this.run=null;return;}this.draw(r,now-r.start);this.frame=requestAnimationFrame(this.tick);}
+ tick(now){
+  // fix-reward-fx-static-and-duo-crash (parche local): ver StreakFlames.tick.
+  const r=this.run;const ms=r?Math.max(0,now-r.start):0;
+  this.ctx.clearRect(0,0,this.w,this.h);
+  if(!r||(!r.loop&&ms>=r.duration)){this.frame=0;this.run=null;return;}
+  try{this.draw(r,ms);}finally{this.frame=requestAnimationFrame(this.tick);}
+ }
  clear(){cancelAnimationFrame(this.frame);this.frame=0;this.run=null;this.ctx.clearRect(0,0,this.w,this.h);}
  destroy(){this.dead=true;this.clear();this.observer.disconnect();if(this.owned)this.canvas.remove();}
 }
@@ -760,7 +806,7 @@ window.CrystalReward=CrystalReward;
 })();
 /* <<< fin crystal-reward.js <<< */
 
-/* >>> duo-reward.js (lluvia de mini Duo (100 sprites + destellos + particulas), peldaño Super) — verbatim, no editar <<< */
+/* >>> duo-reward.js (lluvia de mini Duo (36 sprites + destellos + particulas; 5 en calma), peldaño Super) — vendored, parches locales <<< */
 /* Duo Reward FX · Canvas 2D · no dependencies · transparent overlay */
 (() => {
   'use strict';
@@ -770,7 +816,7 @@ window.CrystalReward=CrystalReward;
   const clamp = (x,a=0,b=1) => Math.max(a,Math.min(b,x));
   const ease = t => 1-Math.pow(1-t,3);
   class DuoReward {
-    constructor({canvas, duration=3000, count=100, respectReducedMotion=true}={}) {
+    constructor({canvas, duration=3000, count=100, reduced=false}={}) {
       this.owned = !canvas;
       this.canvas = canvas || document.createElement('canvas');
       if (this.owned) {
@@ -780,7 +826,7 @@ window.CrystalReward=CrystalReward;
       }
       this.ctx = this.canvas.getContext('2d',{alpha:true});
       this.duration=duration; this.count=count;
-      this.reduced=respectReducedMotion && matchMedia('(prefers-reduced-motion: reduce)').matches;
+      this.reduced=reduced===true;   // fix-reward-fx-static-and-duo-crash: la decision llega del script
       this.image=new Image();
       this.ready=new Promise((resolve,reject)=>{this.image.onload=resolve;this.image.onerror=reject;});
       this.image.src=SPRITE;
@@ -848,7 +894,11 @@ window.CrystalReward=CrystalReward;
       c.closePath();c.fill();
     }
     drawRun(r,now) {
-      const c=this.ctx,ms=now-r.start,u=ms/r.life;
+      // fix-reward-fx-static-and-duo-crash (parche local): sin este clamp, un ms
+      // negativo hacia que ease() devolviera negativo y el radio de la onda de
+      // choque fuera negativo -> Chromium tira IndexSizeError DENTRO del callback
+      // y la reposicion del siguiente frame nunca ocurria.
+      const c=this.ctx,ms=Math.max(0,now-r.start),u=ms/r.life;
       if(u>=1)return;
       const seconds=ms/1000;
       // A brief outlined shockwave; never paint a background rectangle.
@@ -872,7 +922,7 @@ window.CrystalReward=CrystalReward;
           for(let k=5;k>=0;k--) {const prev=this.point(p,Math.max(0,t-k*.018),r);k===5?c.moveTo(prev.x,prev.y):c.lineTo(prev.x,prev.y);}
           c.stroke();c.restore();
         }
-        c.save();c.translate(pos.x,pos.y);c.rotate(p.angle+p.spin*t);
+        c.save();c.translate(pos.x,pos.y);c.rotate(p.angle+(this.reduced?0:p.spin*t));
         c.globalAlpha=alpha;
         const size=p.size*(.35+.65*ease(enter))*(.72+.28*exit);
         if(p.type==='owl') {
@@ -882,7 +932,7 @@ window.CrystalReward=CrystalReward;
           c.drawImage(this.image,-size/2,-size*.858/2,size,size*.858);
         } else {
           c.fillStyle=p.color;
-          if(p.type==='star') {c.globalAlpha*=.65+.35*Math.sin(t*13+p.phase)**2;this.star(c,size);}
+          if(p.type==='star') {if(!this.reduced)c.globalAlpha*=.65+.35*Math.sin(t*13+p.phase)**2;this.star(c,size);}
           else {c.beginPath();c.ellipse(0,0,size*.5,size*.28,0,0,Math.PI*2);c.fill();}
         }
         c.restore();
@@ -899,9 +949,10 @@ window.CrystalReward=CrystalReward;
     }
     tick(now) {
       this.ctx.clearRect(0,0,this.w,this.h);
-      this.runs=this.runs.filter(r=>now-r.start<r.life);
-      for(const r of this.runs)this.drawRun(r,now);
-      this.frame=this.runs.length?requestAnimationFrame(this.tick):0;
+      // fix-reward-fx-static-and-duo-crash (parche local): ver StreakFlames.tick.
+      this.runs=this.runs.filter(r=>Math.max(0,now-r.start)<r.life);
+      try{for(const r of this.runs)this.drawRun(r,now);}
+      finally{this.frame=this.runs.length?requestAnimationFrame(this.tick):0;}
     }
     clear() {cancelAnimationFrame(this.frame);this.frame=0;this.runs=[];this.ctx.clearRect(0,0,this.w,this.h);}
     destroy() {this.dead=true;this.clear();this.observer.disconnect();if(this.owned)this.canvas.remove();}
@@ -1703,6 +1754,7 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
     function teardownTimerFx() {
       raceStartTime = 0;
       lastProjectedRung = null;
+      clearBarMissing();
       stopMiniCrono();
       removeDecayTimeline();
       destroyRewardFx();
@@ -1724,6 +1776,40 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
     // elemento todavía no se midió. Espejo de --adhd-rail-h en el CSS.
     const ADHD_TIMELINE_GAP = 8;
     const ADHD_TIMELINE_H  = 28;
+
+    // fix-reward-fx-killed-by-transient-bar-loss: perder la barra un instante NO
+    // es un fin de vida. Duolingo re-renderiza la fila de la leccion al responder
+    // (boton de salir + barra) y hay un batch de mutaciones en que el detector no
+    // la encuentra. Ese solo batch tumbaba el efecto de recompensa en vuelo, el
+    // cronometro y el riel, sin que nada hubiera terminado.
+    //
+    // El periodo de gracia NO puede vivir en el observer: con la pagina quieta no
+    // llega ningun batch, asi que "N misses seguidos" no vence nunca y el cronometro
+    // no se iría jamás de una pantalla que ya no es leccion. Por eso es un timer que
+    // vuelve a preguntar.
+    //
+    // 250ms: alcanza para el re-render y los batches que ocurren dentro de el, y no
+    // deja un overlay a pantalla completa colgando tiempo discernible.
+    const BAR_MISSING_GRACE_MS = 250;
+    let barMissingSince = 0;
+    let barGraceTimer = 0;
+
+    function clearBarMissing() {
+      barMissingSince = 0;
+      if (barGraceTimer) { clearTimeout(barGraceTimer); barGraceTimer = 0; }
+    }
+
+    function onBarMissing() {
+      if (barGraceTimer) return;              // ya hay una pregunta agendada
+      barMissingSince = Date.now();
+      barGraceTimer = setTimeout(function () {
+        barGraceTimer = 0;
+        // La barra volvio (mismo nodo o equivalente): no era nada.
+        if (ensureRoots()) { clearBarMissing(); return; }
+        clearBarMissing();
+        teardownTimerFx();
+      }, BAR_MISSING_GRACE_MS);
+    }
 
     // rail-fixed-lap-ceiling: la escalera en play para una carrera de `elapsed` ms.
     // Una sola fuente de verdad: riel, cronometro, preview del tramo y el cierre
@@ -2029,6 +2115,16 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
       return resolveMotion(cfg.motionLevel, sys);
     }
 
+    // fix-reward-fx-static-and-duo-crash: la calma DECIDIDA por el sistema, con
+    // el nivel en 'system'. Es lo que el panel explica: sin esta linea una
+    // celebracion quieta es indistinguible de un efecto roto, y el usuario no
+    // tiene donde mirar. Es estado derivado, no un flag guardado: no puede
+    // quedar viejo respecto de la preferencia.
+    function motionAskedBySystem() {
+      return cfg.motionLevel === 'system' &&
+        typeof matchMedia === 'function' && matchMedia(REDUCED_MQ).matches;
+    }
+
     // Aplica el nivel actual. Idempotente: se puede llamar sin miedo.
     // Destruye las instancias cacheadas porque los 3 modulos congelan
     // `this.reduced` en su constructor (design decision 5).
@@ -2060,14 +2156,29 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
       }
     }
 
-    // 4.2: el valor efectivo viaja por respectReducedMotion, que los 3 modulos
-    // ya aceptan. Se calculan fresh en cada fxInstance() porque el nivel
-    // puede cambiar entre dos efectos.
-    const fxOpts = () => ({
-      StreakFlames: { respectReducedMotion: motionOff() },
-      CrystalReward: { respectReducedMotion: motionOff() },
-      DuoReward: { count: 36, respectReducedMotion: motionOff() },
-    });
+    // 4.2: el valor efectivo viaja por `reduced`, que los 3 modulos aceptan tal
+    // cual (fix-reward-fx-static-and-duo-crash). Antes se pasaba
+    // `respectReducedMotion`, que cada modulo combinaba con AND contra su propia
+    // consulta a matchMedia: con el nivel 'never' y un sistema sin preferencia,
+    // la calma se perdia y el efecto se animaba igual.
+    // La variante calmada es ademas chica y corta a proposito (fix del mismo
+    // change): una pared de figuras quietas a pantalla completa es indistinguible
+    // de un efecto roto. count achica la composicion y duration acorta la vida.
+    // OJO con duration: los modulos acotan su duracion por abajo (1500ms en
+    // llamas y cristales, 700ms en Duo cuando esta calmado) y playRewardFx
+    // destruye la instancia con inst.duration + 400ms. Un duration menor al piso
+    // del modulo mataria el efecto a mitad de camino, asi que se pasa el piso.
+    // Y por arriba del piso, no en el: la entrada de los cristales dura 700ms y
+    // la salida 800, asi que con la duracion minima no queda meseta y la version
+    // calmada se ve como un fogonazo en vez de una calma.
+    const fxOpts = () => {
+      const calm = motionOff();
+      return {
+        StreakFlames: { reduced: calm, count: calm ? 4 : 18, duration: calm ? 1800 : 6000 },
+        CrystalReward: { reduced: calm, count: calm ? 4 : 24, duration: calm ? 2200 : 6800 },
+        DuoReward: { reduced: calm, count: calm ? 5 : 36, duration: calm ? 700 : 3000 },
+      };
+    };
     const FX_BY_RUNG = { 3: 'StreakFlames', 4: 'CrystalReward', 5: 'DuoReward' };
     const fxInstances = {};    // nombre -> instancia viva (larga, se reutiliza)
     const fxLastFire = {};     // nombre -> timestamp del ultimo burst
@@ -2723,6 +2834,7 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
             <option value="never"${cfg.motionLevel === 'never' ? ' selected' : ''}>${tr(cfg.lang, 'motionNever')}</option>
           </select>
           <div class="adhd-hint">${tr(cfg.lang, 'hintMotion')}</div>
+          ${motionAskedBySystem() ? `<div class="adhd-hint" id="adhd-motion-system-hint">${tr(cfg.lang, 'hintMotionSystem')}</div>` : ''}
           </div>
         </details>
       `;
@@ -2888,9 +3000,13 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
         const w = bar ? bar.getBoundingClientRect().width : 0;
         const { value } = getProgress();
         if (bar && (w !== lastWidth || value !== lastValue)) render();
+        if (bar) clearBarMissing();
         if (!bar) {
           overlay = null;
-          if (miniCronoEl || decayEl || Object.keys(fxInstances).length) teardownTimerFx();
+          // fix-reward-fx-killed-by-transient-bar-loss: antes, un solo batch sin
+          // barra llamaba a teardownTimerFx() y mataba el efecto en vuelo, el
+          // cronometro y el riel. Ahora la ausencia se re-chequea.
+          onBarMissing();
         }
       });
       mo.observe(document.body, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['aria-valuenow', 'style', 'aria-valuemax'] });
@@ -2911,6 +3027,15 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
       // el default 'system' queda exactamente como antes del cambio.
       syncMotionListener();
       aplicarMotion();
+
+      // fix-reward-fx-static-and-duo-crash: el sprite de Duo es lo mas pesado de
+      // los tres y se decodifica la primera vez que se dispara, o sea DENTRO de
+      // la celebracion que lo necesita. Instanciarlo aqui pone ese decode en
+      // paralelo con la leccion. El constructor no dispara nada: solo crea el
+      // overlay transparente; el burst sigue pasando por playRewardFx().
+      if (cfg.timerShowLabel) {
+        try { fxInstance('DuoReward'); } catch (e) { /* sin modulo Duo: se pierde solo ese FX */ }
+      }
 
       // El sondeo queda con su única responsabilidad: encontrar la barra y
       // renderizar. La barra de lección no existe en pantallas que no son
