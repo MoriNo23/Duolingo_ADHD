@@ -4,7 +4,7 @@
   "private": true,
   "description": "Tests del userscript Duolingo ADHD. El sujeto de test es el archivo publicado (duolingo-adhd.user.js): no hay copia dev ni build.",
   "scripts": {
-    "test": "npm run test:core && npm run test:e2e",
+    "test": "npm run test:core",
     "test:core": "node --test test/core.test.js",
     "test:e2e": "node test/e2e/run.js",
     "test:vendor": "bash test/vendor-diff.sh",

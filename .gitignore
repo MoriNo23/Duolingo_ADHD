@@ -36,6 +36,10 @@ vault/
 *.singlefile.html
 Duolingo - Aprende*.html
 
+# Crapper (CRAP score): reporte y coverage son artefactos locales regenerables
+.metrics/
+target/
+
 # Media + zips + logs (capturas/recordings de trabajo: NUNCA se publican solos.
 # Si un video va al README, se sube a release/ y se trackea a proposito.)
 *.webm
