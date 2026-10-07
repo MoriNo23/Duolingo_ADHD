@@ -4,7 +4,7 @@
 
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![Tampermonkey](https://img.shields.io/badge/tampermonkey-userscript-green)](https://www.tampermonkey.net/)
-[![Version](https://img.shields.io/badge/version-2.9.0-orange)](https://greasyfork.org/es-419/scripts/590127)
+[![Version](https://img.shields.io/badge/version-2.19.0-orange)](https://greasyfork.org/es-419/scripts/590127)
 [![GreasyFork](https://img.shields.io/badge/Greasy%20Fork-Install%20Now-4ca64c)](https://greasyfork.org/es-419/scripts/590127-duolingo-adhd-progress-bar-milestones-for-the-easily-distracted-bored)
 
 </div>
@@ -71,6 +71,10 @@ Open the settings panel with the **tab docked to the right edge** of the screen.
 | **Reward effects** | **on** | Full-screen celebration when a segment is closed on a high tier: **Streak** → animated flames, **Diamond** → faceted crystals, **Super** → a shower of Duo. Lower tiers keep the particle burst only. |
 | **Test effects** | — | Cycles all six bursts and the lost state on the live bar, so you can tune the look without waiting. |
 | **Animations** | **respect system** | Follows the desktop's reduced-motion setting. Set it to **always** to force every effect on, or **never** to calm them all down. Affects this script only — it never changes your OS settings. Toggling it applies live. |
+| **Tier sounds** | **on** | A short sound every time a segment closes, matched to the tier you froze: satisfying on **Streak / Diamond / Super**, unpleasant on **Wood / Bronze / Silver**. Each tier has its own cue. |
+| **Periodic reminder** | **on** | Repeats a soft reminder while duolingo.com is open, **on any screen**. It only sounds when you are **not focused on the page** — 45 s without interacting, or the tab hidden — so it never interrupts you mid-lesson. It never plays catch-up when you come back. |
+| **Every** | **1m** | Interval for the reminder: 15 s – 15 min in 15 s steps (the label shows it as `45s`, `1m`, `5m 30s`). |
+| **Test sound** | — | Plays the reminder cue immediately. Clicking it also unlocks audio for the browser, which blocks all sound until you interact with the page. |
 | **Local journal** | **off** | Starts counting lessons, segments, average time, day streak and total lessons. Off by default; nothing is recorded until you enable it. |
 | **Reset values** | — | Restores all defaults (keeps your chosen language). |
 
@@ -88,18 +92,93 @@ Open the settings panel with the **tab docked to the right edge** of the screen.
 | **Efectos de recompensa** | **activado** | Celebración a pantalla completa al cerrar un tramo de peldaño alto: **Racha** → llamas animadas, **Diamante** → cristales facetados, **Super** → lluvia de Duo. Los peldaños bajos conservan solo las partículas. |
 | **Probar efectos** | — | Cicla los seis bursts y un escalón a la baja sobre la barra real, para que puedas ver los efectos sin esperar. |
 | **Animaciones** | **respetar sistema** | Sigue la preferencia de movimiento reducido del escritorio. Ponela en **siempre** para forzar todos los efectos, o en **nunca** para calmarlos. Afecta solo a este script: nunca cambia la configuración del sistema operativo. Se aplica al instante. |
+| **Sonidos por peldaño** | **activado** | Un sonido corto cada vez que se cierra un tramo, con el peldaño que congelaste: satisfactorio en **Racha / Diamante / Super**, desagradable en **Madera / Bronce / Plata**. Cada peldaño tiene su propio sonido. |
+| **Recordatorio periódico** | **activado** | Repite un aviso suave mientras duolingo.com está abierto, **en cualquier pantalla**. Solo suena cuando **no estás usando la página** — 45 s sin interacción, o la pestaña oculta — así nunca te interrumpe en plena lección. Al volver no repite lo perdido. |
+| **Cada cuánto** | **1m** | Intervalo del recordatorio: de 15 s a 15 min, en pasos de 15 s (el rótulo lo muestra como `45s`, `1m`, `5m 30s`). |
+| **Probar sonido** | — | Suena el recordatorio al toque. El click además desbloquea el audio, que el navegador retiene hasta que interactúas con la página. |
 | **Diario local** | **desactivado** | Empieza a contar lecciones, tramos, tiempo medio, racha de días y lecciones totales. Apagado por defecto; no se registra nada hasta que lo actives. |
 | **Restablecer valores** | — | Vuelve todo a los valores por defecto (conserva el idioma que elegiste). |
 
 **Lo primero para probar si la escalera te parece muy dura:** apagá el **modo tiempo**. Conservás la barra segmentada y las texturas de los peldaños; perdés solo el cronómetro y el riel.
 
+## Sound
+
+The script ships two kinds of sound, both controlled from **Settings → Sound**:
+
+- **A tier fanfare on every closed segment.** It plays in the same instant as the particle burst and the tier freeze. The three high tiers (Streak, Diamond, Super) sound satisfying; the three low tiers (Wood, Bronze, Silver) sound deliberately unpleasant — the same split as the full-screen reward effects. With timer mode off no tier is evaluated, so there is no fanfare.
+- **A periodic reminder while duolingo.com is open.** Default interval **60 s**, configurable from 15 s to 15 min. It does not depend on the lesson bar: it plays on **any screen**, and only when you are idle — no interaction for 45 s, or the tab hidden — so it never interrupts an active lesson. If it falls due while you are focused it waits, and coming back from a hidden tab plays at most one reminder, never a backlog.
+
+Each one has its own toggle, and with everything off the script keeps no timer and prepares no audio at all.
+
+**Browser autoplay.** Chrome and Firefox block all sound until you interact with the page at least once. The first click or key press unlocks it — the **Test sound** button does exactly that. If a cue is still blocked, it is dropped silently and the lesson keeps going: sound never blocks or breaks anything.
+
+**No network requests.** The seven cues are embedded in the script as base64 `data:` URIs, so they load instantly, work offline and can't be blocked by an extension.
+
+### Replacing a sound (ElevenLabs prompts)
+
+Every cue has two interchangeable sources, in this order:
+
+1. the embedded sample in `SOUND_SAMPLES` (inside `duolingo-adhd.user.js`), and
+2. a built-in synthesizer recipe in `SOUND_SYNTH`, always present as the fallback.
+
+To swap in a sound you generate yourself:
+
+1. Generate the SFX with the matching prompt below (ElevenLabs SFX works, so does any other generator). Short, no voice, no music bed.
+2. Trim it and export **mono MP3**, e.g. with ffmpeg — this cuts at 1.6 s and fades the last 0.3 s so a long cue can't cover the next segment closing:
+
+   ```bash
+   ffmpeg -i cue.wav -af "atrim=0:1.6,afade=t=out:st=1.3:d=0.3" -ac 1 -ar 22050 -c:a libmp3lame -b:a 40k cue.mp3
+   ```
+3. Turn it into a data URI:
+
+   ```bash
+   echo -n "data:audio/mpeg;base64,$(base64 -w0 cue.mp3)"
+   ```
+4. In `duolingo-adhd.user.js`, find `const SOUND_SAMPLES = {` and paste the entire string as the value for that cue's key (`super`, `diamante`, `racha`, `plata`, `bronce`, `madera`, `reminder`).
+5. Stay inside the budget: **≤ ~20 KB of base64 per cue, ≤ ~100 KB in total** (the seven shipped samples are ~70 KB together). If one doesn't fit, shorten it or set the value to `''` — the synthesizer takes over for that cue.
+
+Nothing else changes: the trigger, the panel and the tests only care about the cue id.
+
+**The prompts used for the shipped samples:**
+
+| Cue | Character | Prompt |
+|---|---|---|
+| `super` | satisfying, the finale | *Short rewarding game reward jingle, ascending four-note sparkle arpeggio, bright bell and soft chime blend, triumphant but not loud, clean tail, 0.6 seconds, no voice, no music bed* |
+| `diamante` | satisfying, crystalline | *Single bright crystal chime, glassy bell hit with a fast shimmering decay, premium and satisfying, 0.5 seconds, no voice, no music bed* |
+| `racha` | satisfying, quick | *Quick three-tone rising arcade blip, playful and positive, snappy attack, 0.35 seconds, no voice, no music bed* |
+| `plata` | unpleasant, flat | *Dull flat two-tone buzzer, slightly detuned and anticlimactic, unimpressed sound, 0.4 seconds, no voice, no music bed* |
+| `bronce` | unpleasant, dull | *Low dull thud with a short filtered noise scrape, heavy and disappointing, 0.3 seconds, no voice, no music bed* |
+| `madera` | unpleasant, ugly on purpose | *Descending wobbly low woodblock wobble, clumsy and comical failure sound, cheap and scratchy, 0.45 seconds, no voice, no music bed* |
+| `reminder` | a nudge, not an alarm | *Two soft dry woodblock knocks, gentle attention-getting tick-tock, calm and non urgent, 0.35 seconds, no voice, no music bed* |
+
+The shipped samples are trimmed to ≤ 1.9 s and normalised to **-16 LUFS / -2 dBTP**, so all seven sit at the same perceived volume. If you generate your own, match them by ear or with `ffmpeg -af ebur128`.
+
+## Verification
+
+Verification is split on purpose so that development never has to run a browser on the maintainer's machine:
+
+- **Locally**: `npm test` — the unit suite only (`npm run test:core`, Node, ~0.4 s, no browser). It is the red→green loop.
+- **In GitHub Actions** (`.github/workflows/ci.yml`): the unit suite, the mutation harness (`npm run mutate`) and the headless-browser check (`npm run test:e2e`), as three separate steps on a pinned runner image (`ubuntu-24.04`). The heavy layers run **only** there.
+- **Before pushing** (the one check that needs files outside the repo): `npm run test:vendor` — unzip + diff of the three third-party modules against their reference archives (~1 s, no browser). It is not a workflow step because those archives are not tracked.
+- **Flow**: work goes on a branch and is opened as a pull request; a change counts as verified when that pull request's run is green on every layer. Nothing is pushed to `master` directly.
+
+## QA de campo (field QA)
+
+The automated harness (core + e2e) validates the published file against a frozen fixture — a replica of duolingo.com as captured on one date. The real site drifts, and those bugs are found on the real site. Field QA is the stage that closes that loop:
+
+1. **Guion per change.** Every change ends with `qa/guion-<change>.html` — a form (`qa/plantilla-guion.html` is the machinery) with one question per scenario of the change plus a fixed smoke section, to run against the real duolingo.com.
+2. **Evidence via the QA companion.** `qa/adhd-qa-helper.user.js` is a local, never-published userscript the tester installs alongside: it captures page-level runtime errors and copies a diagnostics block (errors, script DOM artifacts, motion) to paste as evidence. It uses no `GM_*` and makes no network requests.
+3. **Report as a gate.** The filled guion exports `qa/reports/<change>-campo.md` (Markdown + front matter: `change`, `version`, `fecha`, `resultado`, `fallas`). **No change is archived without its report** — `resultado: pass`, or an explicit `resultado: skip` with the reason.
+4. **Failures become tracked work.** A FALLA on the change's own questions reopens its tasks; a FALLA on the smoke section outside its scope becomes a new field-bug change citing the report.
+
+The published userscript ships none of this — the guion and the companion live in `qa/`, tracked like `test/`, and the script file stays untouched.
+
 ## Roadmap
 
 Planned, in order:
 
-1. **Sound.** Short, tasteful feedback on tier changes and closed segments. Opt-in, off by default, and no sound that can get grating on repeat.
-2. **UX improvements.** Continued polish on the rail, the panel and how the lap ladder reads at a glance.
-3. **More features in other areas.** Beyond the progress bar.
+1. **UX improvements.** Continued polish on the rail, the panel and how the lap ladder reads at a glance.
+2. **More features in other areas.** Beyond the progress bar.
 
 Suggestions for any of these are welcome — see below.
 
@@ -108,6 +187,7 @@ Suggestions for any of these are welcome — see below.
 - **A personal userscript, not an official product.** Made by one person, for personal use, in the context of language learning. Not affiliated with, endorsed by, or supported by Duolingo.
 - **Nothing leaves your browser.** There is no server, no account and no analytics. Your settings and journal live in the userscript manager's local storage and stay on your machine. Clearing the script's storage deletes them permanently.
 - **The only network request** the script makes is fetching the Baloo 2 font used by the chronometer, and it fails gracefully to a system font if that request is blocked.
+- **The sounds are self-contained.** The seven cues (tier fanfare + reminder) are embedded in the script file itself as `data:` URIs; no audio is downloaded, ever.
 - **The reward effects are self-contained.** The three celebration effects are bundled canvas animations with no external requests; the Super effect embeds a small sprite of the Duo character that you supplied.
 - It is released under the [MIT license](LICENSE). Use it, fork it, adapt it.
 

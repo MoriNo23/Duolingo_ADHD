@@ -61,6 +61,17 @@ const MUTATORS = [
   // motion-default-always: el default paso a 'always'. Un mutador que no matchea es
   // un SKIP y los SKIPs tapan un patron rancio (ver el README del harness).
   c => firstReplace(c, /motionLevel: 'always',/, "motionLevel: 'never',", "DEFAULTS.motionLevel 'always' \u2192 'never'"),
+  // ---------- remind-only-when-idle: la compuerta de idle ----------
+  // Si un mutante sobrevive, el recordatorio puede sonar enfocado o callarse
+  // en idle: justo lo que la spec prohíbe.
+  c => firstReplace(c, /if \(!state \|\| state\.hidden\) return false;/, 'if (!state || state.hidden) return true;', 'canPlayReminder: oculto/basura → true (suena oculto)'),
+  c => firstReplace(c, /return state\.now - state\.lastInteractionAt >= REMINDER_IDLE_MS;/, 'return state.now - state.lastInteractionAt > REMINDER_IDLE_MS;', 'canPlayReminder: umbral inclusivo → exclusivo'),
+  c => firstReplace(c, /return state\.now - state\.lastInteractionAt >= REMINDER_IDLE_MS;/, 'return state.now - state.lastInteractionAt <= REMINDER_IDLE_MS;', 'canPlayReminder: comparación invertida (enfocado suena)'),
+  // ---------- fix-crono-contrast: el par superficie/dígito del contador ----------
+  // Si un mutante sobrevive, el contador vuelve a poder quedar ilegible (el bug
+  // de campo: madera 1.29:1, bronce 1.09:1).
+  c => firstReplace(c, /return contrastOfLuminances\(s, i\) >= contrastOfLuminances\(s, 1\) \? inkHex : '#ffffff';/, "return contrastOfLuminances(s, i) < contrastOfLuminances(s, 1) ? inkHex : '#ffffff';", 'cronoTextColor: emparejamiento invertido (elige el de MENOR contraste)'),
+  c => firstReplace(c, /return contrastOfLuminances\(s, i\) >= contrastOfLuminances\(s, 1\) \? inkHex : '#ffffff';/, "return contrastOfLuminances(s, i) >= contrastOfLuminances(s, 1) ? '#ffffff' : '#ffffff';", 'cronoTextColor: rama de la tinta eliminada (siempre blanco)'),
 ];
 
 // ---------- correr los tests contra el SRC actual ----------

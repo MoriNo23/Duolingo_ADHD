@@ -90,15 +90,21 @@ function serve() {
 // lesson-bar-detection.
 function buildFixture(pathname) {
   const published = fs.readFileSync(PUBLISHED, 'utf8');
+  // add-field-qa-loop: el companion de QA se inyecta en su propio slot. Si
+  // todavía no existe, se inyecta vacío: el chequeo del companion da RED en
+  // vez de romper el armado del fixture.
+  const COMPANION = path.join(ROOT, 'qa', 'adhd-qa-helper.user.js');
+  const companion = fs.existsSync(COMPANION) ? fs.readFileSync(COMPANION, 'utf8') : '';
   // Reemplazo GLOBAL: __GOAL__ aparece mas de una vez en el fixture y
   // String.replace con patron de string solo cambia la primera (la segunda queda
   // como identificador y revienta con ReferenceError en el fixture).
   // Las funciones de reemplazo evitan que $& / $1 del contenido se interpreten.
   const script = fs.readFileSync(FIXTURE, 'utf8')
     .replace(/\/\*__SCRIPT__\*\//g, () => published)
+    .replace(/\/\*__QA_SCRIPT__\*\//g, () => companion)
     .replace(/__PATHNAME__/g, () => pathname)
     .replace(/__GOAL__/g, () => String(GOAL_SEC));
-  if (/__(GOAL|PATHNAME)__/.test(script) || script.includes('__SCRIPT__')) {
+  if (/__(GOAL|PATHNAME)__/.test(script) || script.includes('__SCRIPT__') || script.includes('__QA_SCRIPT__')) {
     throw new Error('el fixture quedo con un marcador sin reemplazar: revisa buildFixture()');
   }
   return script;
@@ -151,6 +157,69 @@ function checkReport(rep, results, { expectLesson, kind = 'none', navOnly = fals
   assert(results, 'el estilo del script se inyecta y parsea', rep.styleRules > 0,
     'reglas=' + rep.styleRules);
 
+  // --- audio-cues: la seccion SONIDO existe, persiste y no rompe nada.
+  // Corre en TODAS las rutas (con y sin barra de leccion) porque el recordatorio
+  // y los controles no dependen de la leccion.
+  const snd = rep.sound || {};
+  assert(results, 'la seccion SONIDO del panel tiene sus 4 controles',
+    snd.present === true, JSON.stringify(snd).slice(0, 400));
+  assert(results, 'los dos sonidos arrancan encendidos (defaults)',
+    snd.cuesChecked === true && snd.reminderChecked === true,
+    'soundCues=' + snd.cuesChecked + ' reminder=' + snd.reminderChecked);
+  assert(results, 'el intervalo arranca en 60s y dentro del rango soportado',
+    snd.range === '60' && snd.rangeMin === '15' && snd.rangeMax === '900',
+    'range=' + snd.range + ' [' + snd.rangeMin + '..' + snd.rangeMax + ']');
+  assert(results, 'el rotulo del intervalo sigue al slider',
+    snd.rangeText === '1m' && snd.rangeTextAfter === '5m',
+    'inicial=' + snd.rangeText + ' despues=' + snd.rangeTextAfter);
+  assert(results, 'el intervalo persiste y sobrevive a reabrir el panel',
+    snd.storedSeconds === 300 && snd.rangeAfterReopen === '300',
+    'store=' + snd.storedSeconds + ' reabierto=' + snd.rangeAfterReopen);
+  assert(results, 'el intervalo se repone en el valor original',
+    snd.storedSecondsRestored === 60, 'store=' + snd.storedSecondsRestored);
+  assert(results, 'el toggle del recordatorio persiste en los dos sentidos',
+    snd.storedReminderOff === false && snd.storedReminderOn === true,
+    'off=' + snd.storedReminderOff + ' on=' + snd.storedReminderOn);
+  assert(results, 'el boton de prueba de sonido no rompe nada',
+    snd.testBtnErrors === 0, 'errores=' + snd.testBtnErrors);
+  assert(results, 'el panel queda cerrado para el resto de la corrida',
+    snd.panelLeftOpen === false, 'abierto=' + snd.panelLeftOpen);
+
+  // --- remind-only-when-idle: el recordatorio suena solo cuando NO estás
+  // enfocado. Solo la ruta principal ejecuta el escenario (es el más lento).
+  const ri = rep.reminderIdle;
+  if (ri) {
+    assert(results, 'el intervalo quedó en 15 s para el escenario (setup verificado)',
+      ri.sliderOk === true, 'store=' + ri.storedSeconds);
+    assert(results, 'interactuando con la página no suena ningún recordatorio',
+      ri.whileFocused === 0, 'cues=' + ri.whileFocused);
+    assert(results, 'al soltar, el recordatorio pendiente suena UNA vez',
+      ri.firstWhenIdle === 1, 'cues=' + ri.firstWhenIdle);
+    assert(results, 'tras sonar, el próximo cue espera el intervalo completo',
+      ri.noSecondRightAfter === 0, 'cues=' + ri.noSecondRightAfter);
+    assert(results, 'el segundo cue llega un intervalo después del primero',
+      ri.secondAfterInterval === 1, 'cues=' + ri.secondAfterInterval);
+    assert(results, 'con la pestaña oculta no suena nada',
+      ri.whileHidden === 0, 'cues=' + ri.whileHidden);
+    assert(results, 'volver y ponerse a trabajar pospone el recordatorio',
+      ri.backToWork === 0, 'cues=' + ri.backToWork);
+    assert(results, 'al volver y quedarse idle: UN cue, sin ráfaga',
+      ri.idleAfterReturn === 1, 'cues=' + ri.idleAfterReturn);
+  }
+
+  // --- add-field-qa-loop: el companion de QA captura el diagnóstico de campo.
+  const qa = rep.qa || {};
+  assert(results, 'el companion de QA está instalado (botón adhd-qa)',
+    qa.present === true, 'present=' + qa.present);
+  assert(results, 'Copiar diagnóstico del companion suelta el bloque observable',
+    qa.copioAlgo === true && qa.tieneErrores === true && qa.tienePath === true
+      && qa.tieneMotion === true && qa.tieneArtefactos === true && qa.noAdivinaVersion === true,
+    'copio=' + qa.copioAlgo + ' errores=' + qa.tieneErrores + ' path=' + qa.tienePath
+      + ' motion=' + qa.tieneMotion + ' artefactos=' + qa.tieneArtefactos
+      + ' noVersion=' + qa.noAdivinaVersion);
+  assert(results, 'un error de runtime termina en el diagnóstico del companion',
+    qa.capturaElError === true, 'capturado=' + qa.capturaElError);
+
   if (expectLesson) {
     assert(results, 'la barra de leccion se detecta', rep.barFound === true);
     assert(results, 'el overlay se crea sobre la barra', rep.overlay === true);
@@ -172,6 +241,11 @@ function checkReport(rep, results, { expectLesson, kind = 'none', navOnly = fals
     assert(results, 'la referencia del riel describe el descenso',
       typeof rep.railTitle === 'string' && rep.railTitle.includes('Madera'),
       rep.railTitle);
+    // audio-cues: segunda pulsación del botón de prueba, con la muestra embebida
+    // ya decodificada (la primera le tocó al sintetizador: el decode es async).
+    if (!navOnly) assert(results, 'la muestra decodificada suena sin errores',
+      rep.soundSamplePresent === true && rep.soundSampleErrors === 0,
+      'present=' + rep.soundSamplePresent + ' errores=' + rep.soundSampleErrors);
 
     // --- el reloj de la escalera, la parte que fallo dos veces ---
     const l = navOnly ? [] : (rep.laps || []);
@@ -194,6 +268,52 @@ function checkReport(rep, results, { expectLesson, kind = 'none', navOnly = fals
       JSON.stringify(l.map((x) => x.label)));
     if (!navOnly) assert(results, 'el marcador de vuelta sigue contando en el piso',
       typeof deep.lapMark === 'number' && deep.lapMark >= 6, 'lapMark=' + deep.lapMark);
+
+    // --- fix-crono-contrast: el contador se lee en cada peldaño y en urgente ---
+    // Se mide el color que el tick PINTO (estilo inline serializado a rgb por el
+    // CSSOM) con su propia formula WCAG, independiente de la implementacion del
+    // script. No se usa getComputedStyle: las transiciones CSS no avanzan de forma
+    // determinista bajo el tiempo virtual del arnes (ver fixture.html, snap()).
+    if (!navOnly) {
+      const parse = (s) => {
+        const m = String(s).match(/rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)/);
+        return m ? { r: +m[1], g: +m[2], b: +m[3], a: m[4] === undefined ? 1 : +m[4] } : null;
+      };
+      const lum = (c) => {
+        const [r, g, b] = [c.r, c.g, c.b].map((v) => v / 255)
+          .map((x) => (x <= 0.03928 ? x / 12.92 : Math.pow((x + 0.055) / 1.055, 2.4)));
+        return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+      };
+      const contrast = (a, b) => {
+        const [hi, lo] = [lum(a), lum(b)].sort((x, y) => y - x);
+        return (hi + 0.05) / (lo + 0.05);
+      };
+      const medidas = l.map((x) => ({ lap: x.lap, bg: parse(x.cronoBg), fg: parse(x.cronoFg) }));
+      const completas = medidas.filter((m) => m.bg && m.fg);
+      assert(results, 'el contador pinta superficie y dígito en cada vuelta muestreada',
+        completas.length === l.length && l.length >= 9,
+        'completas=' + completas.length + '/' + l.length);
+      assert(results, 'la superficie del contador es sólida (sin transparencia)',
+        completas.length > 0 && completas.every((m) => m.bg.a === 1),
+        JSON.stringify(completas.filter((m) => m.bg.a !== 1).map((m) => m.lap)));
+      const peor = completas.reduce((p, m) => {
+        const c = contrast(m.bg, m.fg);
+        return c < p.c ? { c, lap: m.lap } : p;
+      }, { c: Infinity, lap: -1 });
+      assert(results, 'el contador se lee (≥3:1) en cada peldaño de la escalera',
+        completas.length > 0 && peor.c >= 3,
+        'peor=' + peor.c.toFixed(2) + ':1 en la vuelta ' + peor.lap);
+      const distintos = new Set(completas.map((m) => m.bg.r + ',' + m.bg.g + ',' + m.bg.b)).size;
+      assert(results, 'el contador conserva la identidad: el fondo cambia con el peldaño',
+        distintos >= 5, 'fondos distintos=' + distintos);
+
+      const u = rep.cronoUrgent || {};
+      const ub = parse(u.cronoBg), uf = parse(u.cronoFg);
+      assert(results, 'en urgente el contador es rojo sólido con dígitos legibles',
+        u.cronoUrgent === true && ub && uf && ub.a === 1 && contrast(ub, uf) >= 3,
+        'urgente=' + u.cronoUrgent + ' bg=' + u.cronoBg + ' fg=' + u.cronoFg
+          + (ub && uf ? ' ratio=' + contrast(ub, uf).toFixed(2) : ''));
+    }
 
     // --- efectos de recompensa: movimiento real del canvas, no la clase ---
     // fix-reward-fx-static-and-duo-crash. Un burst disparado desde una tarea
