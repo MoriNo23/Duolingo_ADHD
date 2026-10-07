@@ -16,6 +16,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const vm = require('vm');
 
 const PUBLISHED = path.join(__dirname, '..', '..', 'duolingo-adhd.user.js');
 const META = /^\/\/ ==UserScript==[\s\S]*?\/\/ ==\/UserScript==\n/m;
@@ -57,7 +58,16 @@ function loadCore() {
   globalThis.__ADHD_TEST__ = (c) => { core = c; };
   try {
     // window/document indefinidos -> el IIFE browser-only no se ejecuta.
-    new Function('window', 'document', publishedSource())(undefined, undefined);
+    // vm con filename en vez de new Function: misma semántica para el script
+    // (mismo realm, mismos globals, window/document inexistentes), pero V8
+    // atribuye la cobertura al archivo publicado. El wrapper va SIN saltos de
+    // línea y SIN recortar la metadata (son comentarios): cualquier newline de
+    // más/seguado de más desplaza las coordenadas que v8-to-istanbul mapea
+    // contra el texto del disco y rompe el lcov que leen c8/crapper.
+    vm.runInThisContext(
+      '(function (window, document) {' + fs.readFileSync(PUBLISHED, 'utf8') + '})(undefined, undefined);',
+      { filename: PUBLISHED }
+    );
   } finally {
     delete globalThis.__ADHD_TEST__;
   }

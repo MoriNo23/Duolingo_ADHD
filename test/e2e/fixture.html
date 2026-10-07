@@ -79,6 +79,44 @@
   window.__advance = function (ms) { window.__t += ms; };
   window.__now = realNow;
 
+  // remind-only-when-idle: contador de cues. El script reproduce por WebAudio
+  // (buffer para la muestra embebida, osciladores para el sintetizador), así que
+  // se cuenta lo que ARRANCA: el recordatorio son 2 notas sintetizadas o 1
+  // buffer de muestra → "unidades de cue" = buffers + osciladores/2. El estado
+  // del contexto se fuerza a 'running' porque el headless puede retener el
+  // autoplay con gestos sintéticos: acá se prueba CUÁNDO se dispara un cue, no
+  // si el altavoz lo reproduce.
+  window.__cueBufStarts = 0;
+  window.__cueOscStarts = 0;
+  (function () {
+    var AC = window.AudioContext || window.webkitAudioContext;
+    if (typeof AC !== 'function') return;
+    function CountingAC() {
+      var ctx = new AC();
+      try {
+        Object.defineProperty(ctx, 'state', { get: function () { return 'running'; } });
+      } catch (e) { /* si no se puede forzar, los cues pueden quedar ocultos */ }
+      var mkBuf = ctx.createBufferSource.bind(ctx);
+      ctx.createBufferSource = function () {
+        var s = mkBuf();
+        var st = s.start.bind(s);
+        s.start = function () { window.__cueBufStarts++; return st(); };
+        return s;
+      };
+      var mkOsc = ctx.createOscillator.bind(ctx);
+      ctx.createOscillator = function () {
+        var o = mkOsc();
+        var st = o.start.bind(o);
+        o.start = function () { window.__cueOscStarts++; return st(); };
+        return o;
+      };
+      return ctx;
+    }
+    CountingAC.prototype = AC.prototype;
+    window.AudioContext = CountingAC;
+    if (window.webkitAudioContext) window.webkitAudioContext = CountingAC;
+  })();
+
   // fix-reward-fx-static-and-duo-crash: la preferencia del sistema se puede
   // simular. El stub se instala SOLO en la ruta que lo pide, para que el resto
   // de las rutas de la suite siga midiendo contra el matchMedia real.
@@ -142,6 +180,13 @@
 <!-- el archivo publicado, inyectado entero -->
 <script>
 /*__SCRIPT__*/
+</script>
+
+<!-- add-field-qa-loop: el companion de QA, inyectado DESPUÉS del script
+     publicado. Si todavía no existe, el slot queda vacío y el chequeo del
+     companion reporta present=false (RED hasta que se cree). -->
+<script>
+/*__QA_SCRIPT__*/
 </script>
 
 <script>
@@ -213,6 +258,22 @@
   function waitTick() { return new Promise(function (r) { setTimeout(r, 150); }); }
   function step(ms) { window.__advance(ms); return waitTick(); }
 
+  // fix-crono-contrast: avanza dentro de la vuelta en pasos chicos hasta que el
+  // contador entra en urgencia (>80% de la vuelta) y toma esa lectura ya
+  // asentada. Tope de 6 pasos: si nunca urgente, cronoUrgent queda false y la
+  // aserción lo dice.
+  function urgentProbe(GOAL) {
+    var tries = 0;
+    function go() {
+      return step(Math.round(GOAL * 0.12)).then(function () {
+        var s = snap(99);
+        if (s.cronoUrgent || ++tries >= 6) { report.cronoUrgent = s; return null; }
+        return go();
+      });
+    }
+    return go();
+  }
+
   function tierSamples() {
     var out = [];
     return [0, 300, 600, 900, 900, 900].reduce(function (chain, ms) {
@@ -229,12 +290,23 @@
   function snap(lap) {
     var fill = q('.adhd-rail-fill');
     var mark = q('.adhd-lap-mark');
+    // fix-crono-contrast: par de colores que el tick PINTO en el contador (estilo
+    // inline; el CSSOM ya lo serializa a rgb). Se asierta sobre el destino pintado
+    // y no sobre getComputedStyle: con --virtual-time-budget las transiciones CSS
+    // no avanzan de forma determinista y el computado puede quedar en el color de
+    // partida (una corrida local dio 2.18:1 en la vuelta 2 y 3 fondos distintos en
+    // 9 vueltas). Esto sigue fallando si el tick pinta un par equivocado.
+    var crono = q('.adhd-mini-crono');
+    var cs = crono ? crono.style : null;
     return {
       lap: lap,
       label: (q('.adhd-rail-label') || {}).textContent || null,
       lapMark: mark ? parseInt(String(mark.textContent).replace(/[^0-9]/g, ''), 10) : 0,
       material: fill ? getComputedStyle(fill).backgroundImage : null,
       lost: !!fill && /afafaf|d4d4d4/.test(getComputedStyle(fill).backgroundImage),
+      cronoBg: cs ? cs.backgroundColor : null,
+      cronoFg: cs ? cs.color : null,
+      cronoUrgent: crono ? crono.classList.contains('urgent') : null,
     };
   }
 
@@ -331,6 +403,236 @@
 
   function errCount() { return (window.__errors || []).length; }
 
+  // ---------------------------------------------------------------------
+  // audio-cues: la seccion SONIDO tiene que existir, persistir y no explotar.
+  // El panel se abre y se VUELVE A CERRAR: las fases siguientes lo abren con
+  // gear.click() y un panel ya abierto las dejaria sin #adhd-test-fx.
+  // Nada de lo que se toca aqui queda alterado al final: el intervalo vuelve
+  // a 60 y el recordatorio, encendido.
+  // ---------------------------------------------------------------------
+  function soundPanelCheck() {
+    try {
+      var gear = document.querySelector('.adhd-btn');
+      if (!gear) { report.sound = { missingGear: true }; return; }
+      var abierto = !!document.querySelector('#adhd-test-sound');
+      if (!abierto) gear.click();
+
+      var cues = document.querySelector('#adhd-sound-cues');
+      var rem = document.querySelector('#adhd-reminder');
+      var rng = document.querySelector('#adhd-reminder-secs');
+      var val = document.querySelector('#adhd-reminder-secs-val');
+      var btn = document.querySelector('#adhd-test-sound');
+      var out = {
+        present: !!(cues && rem && rng && btn && val),
+        cuesChecked: cues ? cues.checked : null,
+        reminderChecked: rem ? rem.checked : null,
+        range: rng ? rng.value : null,
+        rangeText: val ? val.textContent : null,
+        rangeMin: rng ? rng.min : null,
+        rangeMax: rng ? rng.max : null,
+      };
+
+      // El intervalo muestra su valor mientras se mueve y lo persiste clampado.
+      if (rng && val) {
+        rng.value = '300';
+        rng.dispatchEvent(new Event('input', { bubbles: true }));
+        out.rangeTextAfter = val.textContent;
+        rng.dispatchEvent(new Event('change', { bubbles: true }));
+        out.storedSeconds = window.GM_getValue('adhd_config', {}).reminderSeconds;
+      }
+
+      // El toggle del recordatorio persiste en los dos sentidos y se devuelve.
+      if (rem) {
+        rem.checked = false;
+        rem.dispatchEvent(new Event('change', { bubbles: true }));
+        out.storedReminderOff = window.GM_getValue('adhd_config', {}).reminderEnabled;
+        rem.checked = true;
+        rem.dispatchEvent(new Event('change', { bubbles: true }));
+        out.storedReminderOn = window.GM_getValue('adhd_config', {}).reminderEnabled;
+      }
+
+      // El boton de prueba suena al toque: no tiene que romper nada (el audio
+      // puede estar retenido por la politica de autoplay, eso NO es un error).
+      var antes = (window.__errors || []).length;
+      if (btn) btn.click();
+      out.testBtnErrors = (window.__errors || []).length - antes;
+
+      // Reabrir el panel: el valor nuevo tiene que seguir ahi (mismo cfg), y al
+      // final el escenario queda como estaba — panel cerrado, intervalo 60.
+      if (abierto) {
+        // No deberia pasar: el panel arranca cerrado. Se deja como estaba.
+        out.rangeAfterReopen = (document.querySelector('#adhd-reminder-secs') || {}).value || null;
+      } else {
+        gear.click();                                              // cierra
+        gear.click();                                              // reabre
+        var rng2 = document.querySelector('#adhd-reminder-secs');
+        out.rangeAfterReopen = rng2 ? rng2.value : null;
+        if (rng2) {
+          rng2.value = '60';
+          rng2.dispatchEvent(new Event('change', { bubbles: true }));
+          out.storedSecondsRestored = window.GM_getValue('adhd_config', {}).reminderSeconds;
+        }
+        gear.click();                                              // cierra
+      }
+      out.panelLeftOpen = !!document.querySelector('#adhd-test-sound');
+      report.sound = out;
+    } catch (e) {
+      report.sound = { error: String((e && e.message) || e) };
+    }
+  }
+
+  // ---------------------------------------------------------------------
+  // remind-only-when-idle: el recordatorio solo suena cuando NO estás
+  // enfocado en la página. Tres fases, todas con el intervalo al mínimo
+  // (15 s) para que el escenario sea corto:
+  //   (a) interacción continua a través de varios vencimientos → 0 cues
+  //   (b) se suelta: a los 45 s suena UNO, el próximo un intervalo después
+  //   (c) pestaña oculta varios intervalos → 0; al volver y ponerse a
+  //       trabajar → 0; y al quedarse idle → UNO, nunca una ráfaga.
+  // Los cues se cuentan en unidades (ver el contador de AudioContext): el
+  // tick real del script es quien decide, el arnés solo avanza su reloj y
+  // deja correr el tiempo virtual del browser entre pasos.
+  // ---------------------------------------------------------------------
+  function cueUnits() { return window.__cueBufStarts + Math.ceil(window.__cueOscStarts / 2); }
+  function interact() {
+    ['pointerdown', 'pointermove', 'keydown', 'wheel', 'scroll', 'touchstart']
+      .forEach(function (ev) { document.dispatchEvent(new Event(ev, { bubbles: true })); });
+  }
+  function beat(n) {
+    var p = Promise.resolve();
+    for (var i = 0; i < n; i++) {
+      p = p.then(function () { return new Promise(function (r) { setTimeout(r, 1200); }); });
+    }
+    return p;
+  }
+  function setHidden(h) {
+    try {
+      Object.defineProperty(document, 'hidden', { configurable: true, get: function () { return h; } });
+    } catch (e) { /* sin getter propio el escenario no corre */ }
+    document.dispatchEvent(new Event('visibilitychange'));
+  }
+  function reminderIdleCheck() {
+    // Solo en la ruta principal: es el escenario más lento y el recordatorio
+    // no depende de la lección (la sección SONIDO ya corre en todas).
+    if (location.pathname !== '/lesson/') return Promise.resolve();
+    var out = {};
+    return Promise.resolve().then(function () {
+      var gear = document.querySelector('.adhd-btn');
+      // samplePanelEffects deja el panel ABIERTO: si se clickea el gear sin
+      // mirar, se CIERRA y el slider nunca aparece (el escenario entero
+      // correría con el intervalo viejo). Solo se abre si hace falta y se
+      // deja como se encontró.
+      var estabaAbierto = !!document.querySelector('#adhd-test-sound');
+      out.panelAbiertoAlLlegar = estabaAbierto;
+      if (!estabaAbierto && gear) gear.click();
+      return beat(1).then(function () {
+        var rng = document.querySelector('#adhd-reminder-secs');
+        var rem = document.querySelector('#adhd-reminder');
+        if (rng) {
+          rng.value = '15';
+          rng.dispatchEvent(new Event('input', { bubbles: true }));
+          rng.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+        if (rem && !rem.checked) {
+          rem.checked = true;
+          rem.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+        var cfg = window.GM_getValue('adhd_config', {}) || {};
+        out.storedSeconds = cfg.reminderSeconds;
+        out.sliderOk = out.storedSeconds === 15;
+        if (!estabaAbierto && gear) gear.click();   // deja el panel como estaba
+        return beat(1);
+      });
+    }).then(function () {
+      var c0 = cueUnits();
+      // (a) 25 s de interacción continua: varios vencimientos pasan enfocado.
+      var p = Promise.resolve();
+      for (var i = 0; i < 5; i++) {
+        p = p.then(function () { window.__advance(5000); interact(); return beat(1); });
+      }
+      return p.then(function () {
+        out.whileFocused = cueUnits() - c0;
+        out.c0 = cueUnits();
+      });
+    }).then(function () {
+      // (b) se suelta: 45 s exactos de calma → el pendiente suena UNA vez.
+      window.__advance(45000);
+      return beat(2).then(function () { out.firstWhenIdle = cueUnits() - out.c0; });
+    }).then(function () {
+      // Ni un cue más hasta que el intervalo completo vuelva a vencer.
+      window.__advance(5000);
+      return beat(1).then(function () { out.noSecondRightAfter = cueUnits() - out.c0 - out.firstWhenIdle; });
+    }).then(function () {
+      window.__advance(10000);
+      return beat(2).then(function () {
+        out.secondAfterInterval = cueUnits() - out.c0 - out.firstWhenIdle - out.noSecondRightAfter;
+      });
+    }).then(function () {
+      // (c) pestaña oculta a través de 3+ intervalos: silencio absoluto.
+      var c1 = cueUnits();
+      out.c1 = c1;
+      setHidden(true);
+      window.__advance(50000);
+      return beat(2).then(function () { out.whileHidden = cueUnits() - c1; });
+    }).then(function () {
+      // Vuelve y se pone a trabajar al instante: el pendiente espera.
+      setHidden(false);
+      interact();
+      window.__advance(30000);
+      return beat(2).then(function () { out.backToWork = cueUnits() - out.c1; });
+    }).then(function () {
+      // Y al quedarse idle: UN cue — pasaron 3 intervalos oculto, no 3 cues.
+      window.__advance(20000);
+      return beat(2).then(function () {
+        out.idleAfterReturn = cueUnits() - out.c1 - out.backToWork;
+        try { delete document.hidden; } catch (e) {}   // devuelve el getter real
+        report.reminderIdle = out;
+      });
+    });
+  }
+
+  // ---------------------------------------------------------------------
+  // add-field-qa-loop: el companion de QA captura el diagnóstico de campo.
+  // Se inyecta DESPUÉS del script publicado (slot propio del companion), su
+  // botón es propio (adhd-qa-*) y su bloque reporta lo observable: errores de
+  // la página, artefactos DOM del script y motion. La versión/config exacta del
+  // script NO se adivina (spec field-qa). El error sonda se filtra de
+  // __errors: es del arnés, no del script.
+  // ---------------------------------------------------------------------
+  function qaCompanionCheck() {
+    var out = { present: !!document.querySelector('#adhd-qa-btn') };
+    var btn = document.querySelector('#adhd-qa-copy');
+    if (out.present && btn) {
+      var capturado = null;
+      var clipReal = navigator.clipboard && navigator.clipboard.writeText;
+      try {
+        if (navigator.clipboard) {
+          navigator.clipboard.writeText = function (t) { capturado = t; return Promise.resolve(); };
+        }
+      } catch (e) { /* headless sin clipboard API: queda el fallback del companion */ }
+      btn.click();
+      out.copioAlgo = typeof capturado === 'string' && capturado.length > 0;
+      out.tieneErrores = /errores \(\d+\)/.test(capturado || '');
+      out.tienePath = (capturado || '').indexOf(location.pathname) !== -1;
+      out.tieneMotion = /motion: (calma|animado)/.test(capturado || '');
+      out.tieneArtefactos = /overlay: (presente|ausente)/.test(capturado || '')
+        && /riel: (presente|ausente)/.test(capturado || '');
+      out.noAdivinaVersion = !/version:/.test(capturado || '');
+      // Sonda: el ring buffer del companion debe ver el error de la página.
+      window.dispatchEvent(new ErrorEvent('error', {
+        message: 'qa-diag-inyectado', error: new Error('qa-diag-inyectado'),
+      }));
+      capturado = null;
+      btn.click();
+      out.capturaElError = (capturado || '').indexOf('qa-diag-inyectado') !== -1;
+      if (clipReal) { try { navigator.clipboard.writeText = clipReal; } catch (e) {} }
+      window.__errors = window.__errors.filter(function (m) {
+        return String(m).indexOf('qa-diag-inyectado') === -1;
+      });
+    }
+    report.qa = out;
+  }
+
   function staleFrameCheck() {
     var out = [];
     var names = [['racha', window.StreakFlames], ['diamante', window.CrystalReward], ['super', window.DuoReward]];
@@ -411,6 +713,17 @@
       // decido el sistema y el usuario no dijo nada. Se lee con el panel abierto.
       report.motionSystemHint = !!document.querySelector('#adhd-motion-system-hint');
       report.motionHintText = (document.querySelector('#adhd-motion-system-hint') || {}).textContent || null;
+      // audio-cues: SEGUNDA pulsacion del boton de prueba, con el panel ya
+      // abierto y tiempo real pasado: la muestra embebida ya esta decodificada,
+      // asi que aca corre el camino de la MUESTRA (la primera, recien arrancado
+      // el script, le toca al sintetizador porque el decode es asincrono).
+      var sndBtn2 = document.querySelector('#adhd-test-sound');
+      if (sndBtn2) {
+        var e0 = (window.__errors || []).length;
+        sndBtn2.click();
+        report.soundSampleErrors = (window.__errors || []).length - e0;
+        report.soundSamplePresent = true;
+      }
       btn.click();
       // El canvas se identifica por IDENTIDAD, no por su posicion en el DOM: el
       // script destruye cada efecto cuando termina, asi que el indice del
@@ -634,6 +947,13 @@
     report = snapshot();
     report.barFound = report.overlay;
     finish();                                   // reporte temprano: el runner ya ve algo
+    // audio-cues: se prueba en TODAS las rutas (la seccion del panel existe
+    // aunque no haya leccion) y siempre deja el panel cerrado para las fases
+    // siguientes, que lo abren solas con gear.click().
+    soundPanelCheck();
+    finish();
+    qaCompanionCheck();
+    finish();
     if (!report.rail) return;                   // path que no es leccion
 
     // fix-reward-fx-killed-by-transient-bar-loss: la ruta de fin de vida real
@@ -661,17 +981,21 @@
       .then(function () { report.fxReady = true; finish(); })
       .then(function () { return tierSamples(); })
       .then(function (first) {
-      report.laps.push({
-        lap: 0,
-        label: first[0].label,
-        materials: first.map(function (x) { return x.material; }),
-        labels: first.map(function (x) { return x.label; }),
-        lapMark: 0,
-        lost: false,
-        material: first[0].material,
+      return Promise.resolve().then(function () {
+        var s0 = snap(0);
+        report.laps.push({
+          lap: 0,
+          label: first[0].label,
+          materials: first.map(function (x) { return x.material; }),
+          labels: first.map(function (x) { return x.label; }),
+          lapMark: 0,
+          lost: false,
+          material: first[0].material,
+          cronoBg: s0.cronoBg, cronoFg: s0.cronoFg, cronoUrgent: s0.cronoUrgent,
+        });
+        // Cruzamos el limite de vuelta: la etiqueta debe bajar UN peldaño.
+        return step(GOAL).then(function () { report.laps.push(snap(1)); });
       });
-      // Cruzamos el limite de vuelta: la etiqueta debe bajar UN peldaño.
-      return step(GOAL).then(function () { report.laps.push(snap(1)); });
     }).then(function () {
       // Hasta el piso (6 peldaños) y mas alla: el wrap es infinito, nunca derrota.
       var chain = Promise.resolve();
@@ -682,7 +1006,8 @@
         })(i);
       }
       return chain;
-    }).then(navCleansUp).then(finish).catch(function (e) {
+    }).then(function () { return urgentProbe(GOAL); })
+    .then(reminderIdleCheck).then(navCleansUp).then(finish).catch(function (e) {
       // Nunca dejar al runner sin reporte: si la cadena falla, se dice por que.
       if (typeof report === 'undefined' || !report) report = snapshot();
       // OJO: finish() reescribe report.errors con window.__errors, asi que un

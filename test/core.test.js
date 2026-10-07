@@ -7,6 +7,7 @@
 const { test, describe } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const path = require('node:path');
 
 const { loadCore, publishedSource, publishedPath, resetGmStore } = require('./harness/core-loader.js');
 
@@ -1180,5 +1181,497 @@ describe('lesson-bar-container-anchor: findBarBySignature (fallback)', () => {
   test('super está por encima de diamante (orden del proposal)', () => {
     assert.ok(C.RUNGS.indexOf(C.RUNGS.find(r => r.id === 'super')) >
               C.RUNGS.indexOf(C.RUNGS.find(r => r.id === 'diamante')));
+  });
+});
+
+describe('audio-cues: núcleo puro del sonido', () => {
+  const src = publishedSource();
+
+  test('cueForRung mapea los 6 peldaños en orden de RUNGS', () => {
+    assert.deepEqual(
+      [0, 1, 2, 3, 4, 5].map(C.cueForRung),
+      ['madera', 'bronce', 'plata', 'racha', 'diamante', 'super']
+    );
+  });
+
+  test('los 3 altos suenan satisfactorios y los 3 bajos desagradables', () => {
+    assert.deepEqual(C.SATISFYING_CUES, ['racha', 'diamante', 'super']);
+    for (const r of [3, 4, 5]) assert.ok(C.SATISFYING_CUES.includes(C.cueForRung(r)));
+    for (const r of [0, 1, 2]) assert.ok(!C.SATISFYING_CUES.includes(C.cueForRung(r)));
+  });
+
+  test('fuera de rango o sin índice no hay cue (cierre sin peldaño)', () => {
+    for (const v of [-1, 6, 99, 1.5, '3', null, undefined, NaN, {}]) {
+      assert.equal(C.cueForRung(v), null, 'cueForRung(' + String(v) + ') debería ser null');
+    }
+  });
+
+  test('clampReminderSeconds acota a 15–900 y defaultea ante ruido', () => {
+    assert.equal(C.clampReminderSeconds(5), 15, 'por debajo del mínimo');
+    assert.equal(C.clampReminderSeconds(5000), 900, 'por encima del máximo');
+    assert.equal(C.clampReminderSeconds(60), 60, 'el default pasa limpio');
+    assert.equal(C.clampReminderSeconds(NaN), C.REMINDER_DEFAULT_SECONDS, 'NaN → default');
+    assert.equal(C.clampReminderSeconds('ruido'), C.REMINDER_DEFAULT_SECONDS, 'texto → default');
+    assert.equal(C.clampReminderSeconds(undefined), C.REMINDER_DEFAULT_SECONDS, 'undefined → default');
+    assert.equal(C.clampReminderSeconds(0), 15);
+    assert.equal(C.clampReminderSeconds(900), 900);
+    assert.equal(C.REMINDER_DEFAULT_SECONDS, 60, 'el intervalo por defecto es 60s');
+  });
+
+  test('un config guardado antes del cambio carga con los defaults de sonido', () => {
+    // La persistencia es additiva: una config vieja gana los tres valores nuevos
+    // sin perder ninguna clave propia (mismo mecanismo que motionLevel).
+    const viejo = { separators: 6, lang: 'en', timerMode: true, motionLevel: 'never', journalEnabled: true };
+    const merged = Object.assign({}, C.DEFAULTS, viejo);
+    assert.equal(merged.soundCues, true);
+    assert.equal(merged.reminderEnabled, true);
+    assert.equal(merged.reminderSeconds, 60);
+    assert.equal(merged.lang, 'en');
+    assert.equal(merged.motionLevel, 'never');
+    assert.equal(merged.journalEnabled, true);
+    assert.equal(merged.separators, 6);
+  });
+
+  test('formatIntervalLabel deja el intervalo legible en el panel', () => {
+    assert.equal(C.formatIntervalLabel(45), '45s');
+    assert.equal(C.formatIntervalLabel(60), '1m');
+    assert.equal(C.formatIntervalLabel(90), '1m 30s');
+    assert.equal(C.formatIntervalLabel(300), '5m');
+    assert.equal(C.formatIntervalLabel(9999), '15m', 'un valor editado a mano se lee clampado');
+  });
+
+  test('los 7 cues tienen muestra embebida y receta sintetizada', () => {
+    assert.deepEqual(C.SOUND_CUE_IDS.slice().sort(),
+      ['bronce', 'diamante', 'madera', 'plata', 'racha', 'reminder', 'super']);
+    for (const id of C.SOUND_CUE_IDS) {
+      const muestra = new RegExp(id + ":\\s*'data:audio/mpeg;base64,[A-Za-z0-9+/=]+'");
+      assert.equal(muestra.test(src), true, 'falta la muestra embebida de ' + id);
+    }
+    const synth = src.slice(src.indexOf('const SOUND_SYNTH'), src.indexOf('let audioCtx'));
+    assert.ok(synth.length > 0, 'falta SOUND_SYNTH');
+    for (const id of C.SOUND_CUE_IDS) {
+      assert.equal(new RegExp('^\\s*' + id + ':\\s*\\{', 'm').test(synth), true,
+        'falta la receta sintetizada de ' + id);
+    }
+  });
+
+  test('el registro de muestras y el de recetas cubren exactamente los 7 cues', () => {
+    const muestras = src.match(/^\s*(\w+):\s*'data:audio\/mpeg;base64,/gm).map(s => s.trim().split(':')[0]);
+    const recetas = src.slice(src.indexOf('const SOUND_SYNTH'), src.indexOf('let audioCtx'))
+      .match(/^\s*(\w+):\s*\{/gm).map(s => s.trim().split(':')[0]);
+    assert.deepEqual(muestras.sort(), C.SOUND_CUE_IDS.slice().sort());
+    assert.deepEqual(recetas.sort(), C.SOUND_CUE_IDS.slice().sort());
+  });
+
+  test('el panel declara la sección SONIDO con sus 4 controles', () => {
+    for (const sel of ['id="adhd-sound-cues"', 'id="adhd-reminder"',
+                       'id="adhd-reminder-secs"', 'id="adhd-test-sound"']) {
+      assert.equal(src.includes(sel), true, 'falta el control ' + sel);
+    }
+    assert.equal(src.includes('secSonido'), true, 'falta la sección');
+    // El intervalo se pinta clampado y con el rango soportado.
+    assert.equal(/id="adhd-reminder-secs" min="\$\{REMINDER_MIN_SECONDS\}" max="\$\{REMINDER_MAX_SECONDS\}"/.test(src), true,
+      'el slider no usa los límites del núcleo');
+    assert.equal(/value="\$\{clampReminderSeconds\(cfg\.reminderSeconds\)\}"/.test(src), true,
+      'el slider no arranca clampado');
+  });
+
+  test('el panel tiene i18n para los 7 textos nuevos, en ES y EN', () => {
+    const claves = ['secSonido', 'lblSoundCues', 'hintSoundCues', 'lblReminder',
+                    'hintReminder', 'lblReminderInterval', 'btnTestSound'];
+    for (const k of claves) {
+      for (const lang of ['es', 'en']) {
+        assert.equal(C.tr(lang, k) !== undefined, true, 'falta ' + k + ' en ' + lang);
+      }
+      assert.notEqual(C.tr('es', k), C.tr('en', k), k + ' no está traducida');
+    }
+  });
+
+  test('los controles persisten y el intervalo reinicia el scheduler', () => {
+    const i = src.indexOf("querySelector('#adhd-sound-cues')");
+    assert.ok(i > -1, 'falta el listener del toggle de sonidos');
+    const handler = src.slice(i, i + 1400);
+    assert.equal(/setCfg\('soundCues'/.test(handler), true, 'el toggle de sonidos no persiste');
+    assert.equal(/setCfg\('reminderEnabled'/.test(handler), true, 'el toggle del recordatorio no persiste');
+    assert.equal(/syncReminder\(\)/.test(handler), true, 'el recordatorio no se re-arma al cambiarlo');
+    assert.equal(/setCfg\('reminderSeconds'/.test(handler), true, 'el intervalo no persiste');
+    assert.equal(/clampReminderSeconds\(parseInt/.test(handler), true, 'el intervalo no se clampa al guardar');
+    assert.equal(/querySelector\('#adhd-test-sound'\)/.test(src), true, 'falta el listener del botón de prueba');
+  });
+
+  test('init arma el recordatorio y el desbloqueo sin depender de la lección', () => {
+    const i = src.indexOf('function init()');
+    const cuerpo = src.slice(i, src.indexOf('\n  }', i));
+    assert.equal(/bindAudioUnlock\(\)/.test(cuerpo), true, 'init no ata el desbloqueo de audio');
+    assert.equal(/syncReminder\(\)/.test(cuerpo), true, 'init no arranca el recordatorio');
+    // Tiene que estar antes del sondeo de la barra: si no, no sonaría en /learn.
+    assert.ok(cuerpo.indexOf('syncReminder()') < cuerpo.indexOf('ensureRoots()'),
+      'el recordatorio no puede esperar a que haya barra');
+  });
+
+  test('el recordatorio vive en su propio tick y no acumula deuda con la pestaña oculta', () => {
+    const i = src.indexOf('function reminderTick()');
+    const cuerpo = src.slice(i, src.indexOf('function syncReminder()', i));
+    assert.ok(i > -1 && cuerpo.length > 0, 'falta reminderTick()');
+    assert.equal(/document\.hidden/.test(cuerpo), true, 'no mira si la pestaña está oculta');
+    assert.equal(/reminderNextAt = Date\.now\(\) \+ ms/.test(cuerpo), true,
+      'con la pestaña oculta no se empuja el vencimiento: se acumularía deuda');
+    assert.equal(/playCue\('reminder'\)/.test(cuerpo), true, 'no reproduce el recordatorio');
+
+    // El timer solo existe con el recordatorio encendido (costo cero apagado).
+    const sync = src.slice(src.indexOf('function syncReminder()'), src.indexOf('function reminderTick()'));
+    assert.equal(/cfg\.reminderEnabled\) startReminder\(\); else stopReminder\(\)/.test(sync), true,
+      'syncReminder no crea/destruye el timer según el toggle');
+    assert.equal(/if \(reminderTimer\) \{ clearInterval\(reminderTimer\)/.test(src), true,
+      'stopReminder no limpia el timer');
+  });
+
+  test('los disparos del cierre de tramo están gateados por soundCues y timerMode', () => {
+    const disparos = src.match(/if \(cfg\.soundCues && cfg\.timerMode\)[^\n]*playTierCue\(/g) || [];
+    assert.equal(disparos.length, 2, 'esperaba 2 disparos (cruce + último tramo): ' + disparos.length);
+    assert.equal(/if \(!cfg\.soundCues\) return;/.test(src), true,
+      'playTierCue no corta cuando los sonidos están apagados');
+    // El listener del botón de prueba y el gate no pueden pisarse.
+    assert.equal(/function playTierCue\(rung\)/.test(src), true, 'falta playTierCue()');
+    assert.equal(/TIER_CUE_MIN_GAP_MS/.test(src), true, 'falta la separación mínima entre cues');
+  });
+
+  test('playCue nunca lanza y el AudioContext es único y perezoso', () => {
+    const i = src.indexOf('function playCue(id)');
+    const cuerpo = src.slice(i, src.indexOf('function playTierCue', i));
+    assert.ok(i > -1, 'falta playCue()');
+    assert.equal(/try \{[\s\S]*\} catch \(e\)/.test(cuerpo), true, 'playCue no está envuelto en try/catch');
+    assert.equal(/const AC = window\.AudioContext \|\| window\.webkitAudioContext/.test(src), true,
+      'no usa el prefijo webkit como fallback');
+    assert.equal(/audioMaster\.gain\.value = 0\.7/.test(src), true, 'falta el gain master');
+    assert.equal(/window\.addEventListener\('pointerdown'/.test(src), true,
+      'no hay desbloqueo en el primer gesto');
+    assert.equal(/window\.addEventListener\('keydown'/.test(src), true,
+      'sin gesto de teclado no hay desbloqueo en pantallas táctiles raras');
+    assert.equal(/decodeAudioData\(dataUriBuffer\(uri\)/.test(src), true,
+      'las muestras no se decodifican desde el data URI');
+    assert.equal(/fetch\(|XMLHttpRequest|GM_xmlhttpRequest\(/.test(cuerpo), false,
+      'playCue hace una petición de red: la spec lo prohíbe');
+  });
+
+  test('las muestras embebidas son MP3 válidos y respetan el presupuesto', () => {
+    let total = 0;
+    for (const id of C.SOUND_CUE_IDS) {
+      const m = src.match(new RegExp(id + ":\\s*'data:audio/mpeg;base64,([A-Za-z0-9+/=]+)'"));
+      assert.ok(m, 'falta la muestra de ' + id);
+      const buf = Buffer.from(m[1], 'base64');
+      total += m[1].length;
+      // Cabecera ID3 o frame sync MPEG: si no, lo que se embebió no es audio.
+      const esMp3 = (buf[0] === 0x49 && buf[1] === 0x44 && buf[2] === 0x33) ||
+                    (buf.length > 1 && buf[0] === 0xff && (buf[1] & 0xe0) === 0xe0);
+      assert.equal(esMp3, true,
+        id + ' no es MP3 (bytes: ' + buf.slice(0, 4).toString('hex') + ')');
+      assert.ok(buf.length > 2048, id + ' quedó sospechosamente chica: ' + buf.length);
+      // Presupuesto del design: ≤ 40KB por cue medido en el archivo publicado.
+      assert.ok(m[1].length <= 55000, id + ' se pasa del presupuesto: ' + m[1].length + 'B de base64');
+    }
+    assert.ok(total <= 100000, 'el audio embebido total se pasa de presupuesto: ' + total + 'B');
+  });
+
+  test('las recetas sintéticas son distintas y cortas (fallback audiblemente diferenciable)', () => {
+    const synth = src.slice(src.indexOf('const SOUND_SYNTH'), src.indexOf('let audioCtx'));
+    const firmas = [];
+    for (const id of C.SOUND_CUE_IDS) {
+      const m = synth.match(new RegExp('^\\s*' + id + ':\\s*\\{([^}]*)\\}', 'm'));
+      assert.ok(m, 'falta la receta de ' + id);
+      const len = m[1].match(/len:\s*([\d.]+)/);
+      assert.ok(len, id + ' sin duración');
+      assert.ok(+len[1] <= 0.7, id + ' dura ' + len[1] + 's: taparía el siguiente cierre');
+      assert.equal(/wave:\s*'(triangle|square|sine|sawtooth)'/.test(m[1]), true, id + ' sin wave válida');
+      assert.equal(/seq:\s*\[[^\]]+\]/.test(m[1]), true, id + ' sin secuencia de notas');
+      firmas.push(m[1].replace(/\s+/g, ' ').trim());
+    }
+    assert.equal(new Set(firmas).size, firmas.length, 'hay recetas idénticas entre sí');
+    assert.ok(/523, 659, 784, 1047/.test(firmas[C.SOUND_CUE_IDS.indexOf('super')]),
+      'super no cierra agudo: no suena satisfactorio');
+    assert.ok(/196, 165, 130/.test(firmas[C.SOUND_CUE_IDS.indexOf('madera')]),
+      'madera no es la más grave de la escalera');
+  });
+});
+
+describe('remind-only-when-idle: el recordatorio solo suena en idle', () => {
+  const src = publishedSource();
+
+  test('REMINDER_IDLE_MS fija el umbral de foco en 45 s', () => {
+    assert.equal(C.REMINDER_IDLE_MS, 45000);
+  });
+
+  test('canPlayReminder suena con la pestaña visible y 45 s sin interacción', () => {
+    assert.equal(C.canPlayReminder({ now: 100000, lastInteractionAt: 55000, hidden: false }), true);
+  });
+
+  test('canPlayReminder no suena si el usuario interactuó hace 10 s (está enfocado)', () => {
+    assert.equal(C.canPlayReminder({ now: 100000, lastInteractionAt: 90000, hidden: false }), false);
+  });
+
+  test('canPlayReminder nunca suena con la pestaña oculta (reproducir exige visible)', () => {
+    assert.equal(C.canPlayReminder({ now: 100000, lastInteractionAt: 0, hidden: true }), false);
+  });
+
+  test('el umbral es inclusivo y la entrada basura no suena', () => {
+    assert.equal(C.canPlayReminder({ now: 100000, lastInteractionAt: 55001, hidden: false }), false);
+    assert.equal(C.canPlayReminder(undefined), false);
+    assert.equal(C.canPlayReminder({}), false);
+    assert.equal(C.canPlayReminder({ now: NaN, lastInteractionAt: 0, hidden: false }), false);
+    assert.equal(C.canPlayReminder({ now: 100000, hidden: false }), false);
+  });
+
+  test('el tick solo dispara en idle: enfocado queda pendiente sin mover el vencimiento', () => {
+    const i = src.indexOf('function reminderTick()');
+    assert.ok(i > -1, 'falta reminderTick()');
+    const cuerpo = src.slice(i, src.indexOf("document.addEventListener('visibilitychange'", i));
+    // El gate de idle vive en el núcleo puro y el tick lo consulta.
+    assert.equal(/canPlayReminder\(\{ now, lastInteractionAt, hidden: document\.hidden \}\)/.test(cuerpo), true,
+      'el tick no consulta el gate de idle');
+    assert.equal(/reminderPending = true/.test(cuerpo), true, 'no queda pendiente cuando toca enfocado');
+    // Pendiente ≠ vencido de nuevo: el branch que no suena NO reagenda.
+    const pendiente = cuerpo.slice(cuerpo.indexOf('reminderPending = true'),
+      cuerpo.indexOf('reminderPending = true') + 80);
+    assert.equal(/reminderNextAt\s*=/.test(pendiente), false,
+      'el branch pendiente reagenda: acumularía deuda');
+    // El único reagenda del tick nace del momento en que SONÓ.
+    assert.equal((cuerpo.match(/reminderNextAt =/g) || []).length, 1,
+      'el tick reagenda más de una vez');
+    assert.ok(cuerpo.indexOf("playCue('reminder')") < cuerpo.indexOf('reminderNextAt ='),
+      'el próximo intervalo no nace del momento del play');
+  });
+
+  test('al volver de una pestaña oculta: gracia de 5 s y reset solo si nada pendía', () => {
+    assert.equal(/REMINDER_RETURN_GRACE_MS = 5000/.test(src), true, 'la gracia no es ~5 s');
+    const i = src.indexOf("document.addEventListener('visibilitychange'");
+    const cuerpo = src.slice(i, i + 700);
+    assert.equal(/pendingReturnAt = Date\.now\(\) \+ REMINDER_RETURN_GRACE_MS/.test(cuerpo), true,
+      'la gracia no se sella al volver');
+    assert.equal(/if \(!reminderPending\)/.test(cuerpo), true,
+      'el reset del vencimiento no mira lo pendiente');
+    const tick = src.slice(src.indexOf('function reminderTick()'),
+      src.indexOf("document.addEventListener('visibilitychange'"));
+    assert.equal(/pendingReturnAt/.test(tick), true, 'el tick no respeta la gracia');
+  });
+
+  test('los listeners de interacción viven y mueren con el toggle (costo cero apagado)', () => {
+    const evs = src.match(/REMINDER_IDLE_EVENTS = \[([^\]]+)\]/);
+    assert.ok(evs, 'falta la lista de eventos de interacción');
+    for (const ev of ['pointerdown', 'pointermove', 'keydown', 'wheel', 'scroll', 'touchstart']) {
+      assert.equal(evs[1].includes("'" + ev + "'"), true, 'falta el evento ' + ev);
+    }
+    const start = src.slice(src.indexOf('function startReminder()'), src.indexOf('function syncReminder()'));
+    assert.equal(/document\.addEventListener\(ev, stampInteraction, \{ capture: true, passive: true \}\)/.test(start), true,
+      'los listeners de idle no son capture+passive');
+    assert.equal(/lastInteractionAt = Date\.now\(\)/.test(start), true,
+      'encender no estampa la interacción: sonaría de inmediato');
+    const stop = src.slice(src.indexOf('function stopReminder()'), src.indexOf('function startReminder()'));
+    assert.equal(/document\.removeEventListener\(ev, stampInteraction, true\)/.test(stop), true,
+      'apagar no retira los listeners: costo cero roto');
+  });
+});
+
+describe('add-field-qa-loop: plantilla del guion de campo', () => {
+  const plantillaPath = path.join(__dirname, '..', 'qa', 'plantilla-guion.html');
+
+  function plantillaSrc() { return fs.readFileSync(plantillaPath, 'utf8'); }
+
+  // El builder del reporte vive en el unico <script> inline de la plantilla;
+  // se evalua con stubs para probar el artefacto real, no una copia.
+  function guionApi() {
+    const html = plantillaSrc();
+    const m = html.match(/<script>([\s\S]*?)<\/script>/);
+    assert.ok(m, 'la plantilla no tiene script inline');
+    const winStub = {};
+    // eslint-disable-next-line no-new-func
+    new Function('window', 'document', 'localStorage', m[1])(
+      winStub, { getElementById: () => null }, undefined);
+    assert.ok(winStub.__guion, 'el script no expone __guion');
+    return winStub.__guion;
+  }
+
+  test('la plantilla existe, es offline y sin dependencias', () => {
+    const html = plantillaSrc();
+    assert.equal(/<script src=/.test(html), false, 'carga un script externo');
+    assert.equal(/(src|href)="https?:/.test(html), false, 'referencia recursos de red');
+    assert.equal(/url\(https?:/.test(html), false, 'importa CSS externo');
+  });
+
+  test('el smoke fijo viene pre-impreso con sus 8 items', () => {
+    const html = plantillaSrc();
+    for (const id of ['smoke-boot', 'smoke-barra', 'smoke-riel', 'smoke-panel',
+                      'smoke-sonido', 'smoke-motion', 'smoke-recordatorio', 'smoke-journal']) {
+      assert.equal(html.includes('data-q="' + id + '"'), true, 'falta el smoke ' + id);
+    }
+  });
+
+  test('el builder exporta MD con front matter y verdictos greppables', () => {
+    const api = guionApi();
+    const data = {
+      meta: { change: 'demo-change', version: '9.9.9', fecha: '2026-10-06' },
+      saltoGeneral: false, saltoMotivo: '',
+      preguntas: [
+        { id: 'c1', seccion: 'Preguntas del change', texto: 'Suena el recordatorio en idle', verdict: 'OK', nota: 'lo probe 3 veces', evidencia: 'version 9.9.9' },
+        { id: 'c2', seccion: 'Preguntas del change', texto: 'El riel no se superpone', verdict: 'FALLA', nota: 'se pisa con el cronometro', evidencia: 'path /lesson' },
+        { id: 's1', seccion: 'Smoke', texto: 'boot sin errores', verdict: 'SALTO', nota: '', evidencia: '' },
+      ],
+    };
+    const md = api.buildReport(data);
+    assert.ok(md.startsWith('---\n'), 'no abre con front matter');
+    for (const clave of ['change: demo-change', 'version: 9.9.9', 'fecha: 2026-10-06',
+                         'resultado: fail', 'fallas: 1']) {
+      assert.equal(md.includes(clave), true, 'falta en el front matter: ' + clave);
+    }
+    for (const marca of ['[OK]', '[FALLA]', '[SALTO]', 'Nota:', 'Evidencia:']) {
+      assert.equal(md.includes(marca), true, 'falta la marca ' + marca);
+    }
+    assert.equal(md.includes('lo probe 3 veces'), true, 'pierde la nota');
+    assert.equal(md.includes('se pisa con el cronometro'), true, 'pierde la nota de la falla');
+  });
+
+  test('el resultado se computa: pass/fail/skip y el export se niega sin responder', () => {
+    const api = guionApi();
+    const q = (verdict) => [{ verdict }];
+    assert.equal(api.computeResultado(q('OK'), false), 'pass');
+    assert.equal(api.computeResultado(q('FALLA'), false), 'fail');
+    assert.equal(api.computeResultado(q('OK'), true), 'skip');
+    assert.equal(api.computeResultado([{ verdict: null }], false), null,
+      'una pregunta sin verdict no puede exportar');
+    assert.equal(api.reportName('demo-change'), 'demo-change-campo.md');
+  });
+});
+
+describe('add-field-qa-loop: companion de QA + revert del in-script', () => {
+  const companionPath = path.join(__dirname, '..', 'qa', 'adhd-qa-helper.user.js');
+  const src = publishedSource();
+
+  test('el companion existe, sin GM_* y sin red', () => {
+    const qa = fs.readFileSync(companionPath, 'utf8');
+    assert.equal(/@grant\s+none/.test(qa), true, 'debe declararse @grant none');
+    assert.equal(/GM_getValue|GM_setValue|GM_deleteValue|GM_xmlhttpRequest|GM_info/.test(qa), false,
+      'el companion no debe usar la API de manager: es un observador de página');
+    assert.equal(/fetch\(|XMLHttpRequest|navigator\.sendBeacon/.test(qa), false,
+      'el companion hace una peticion de red: la spec lo prohíbe');
+    assert.equal(/https?:\/\/(?!www\.w3\.org)/.test(qa.replace(/\/\/[^\n]*|\/\*[\s\S]*?\*\//g, '')), false,
+      'el código del companion referencia una URL externa');
+  });
+
+  test('el companion captura errores y expone su propio control adhd-qa-*', () => {
+    const qa = fs.readFileSync(companionPath, 'utf8');
+    assert.equal(/window\.addEventListener\('error'/.test(qa), true, 'no escucha errores de la página');
+    assert.equal(/window\.addEventListener\('unhandledrejection'/.test(qa), true, 'no escucha rechazos');
+    assert.equal(/addEventListener\('error'[\s\S]{0,220}qaRingPush\(/.test(qa), true,
+      'el hook de error no alimenta el ring buffer');
+    assert.equal(/addEventListener\('unhandledrejection'[\s\S]{0,260}qaRingPush\(/.test(qa), true,
+      'el hook de rechazo no alimenta el ring buffer');
+    for (const id of ['adhd-qa-btn', 'adhd-qa-panel', 'adhd-qa-copy', 'adhd-qa-status']) {
+      assert.equal(qa.includes(id), true, 'falta ' + id);
+    }
+    assert.equal(qa.includes('navigator.clipboard'), true, 'no usa el portapapeles');
+    assert.equal(/execCommand\('copy'\)/.test(qa), true, 'falta el fallback de copia');
+    assert.equal(qa.includes('motion: '), true, 'no reporta el motion efectivo');
+    assert.equal(qa.includes('overlay: '), true, 'no reporta el overlay');
+    assert.equal(/'presente'|'ausente'/.test(qa), true, 'no reporta presencia/ausencia de artefactos');
+    assert.equal(/version:/.test(qa.replace(/\/\/[^\n]*/g, '')), false,
+      'el companion no debe adivinar la version del script publicado');
+  });
+
+  test('el userscript publicado quedó limpio del diagnóstico in-script', () => {
+    for (const marker of ['adhd-diag', 'diagAddError', 'diagErrors', 'diagReset',
+                          'buildDiagnosticBlock', 'secDiag', 'btnCopyDiag', 'hintDiag',
+                          'diagCopied', 'DIAG_SVG', 'DIAG_RING_LIMIT']) {
+      assert.equal(src.includes(marker), false, 'quedó ' + marker + ' en el archivo publicado');
+    }
+  });
+});
+
+describe('fix-crono-contrast: el contador legible en cada peldaño', () => {
+  const src = publishedSource();
+
+  // Contraste WCAG calculado acá, independiente de la implementación.
+  function lum(hex) {
+    const h = hex.replace('#', '');
+    const [r, g, b] = [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16) / 255)
+      .map((c) => (c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4)));
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  }
+  function ratio(a, b) {
+    const [hi, lo] = [lum(a), lum(b)].sort((x, y) => y - x);
+    return (hi + 0.05) / (lo + 0.05);
+  }
+
+  test('cronoTextColor empareja cada peldaño con su dígito legible', () => {
+    const esperado = {
+      madera: '#ffffff', bronce: '#ffffff', plata: null,
+      racha: null, diamante: null, super: '#ffffff',
+    };
+    for (const R of C.RUNGS) {
+      const dig = C.cronoTextColor(R.from, R.ink);
+      const quiere = esperado[R.id] === null ? R.ink : esperado[R.id];
+      assert.equal(dig, quiere, R.id + ': dígito ' + dig + ' en vez de ' + quiere);
+    }
+  });
+
+  test('cada peldaño supera 3:1 con su dígito emparejado (spec: large text)', () => {
+    for (const R of C.RUNGS) {
+      const dig = C.cronoTextColor(R.from, R.ink);
+      assert.ok(ratio(R.from, dig) >= 3, R.id + ' queda en ' + ratio(R.from, dig).toFixed(2) + ':1');
+    }
+  });
+
+  test('cronoTextColor elige siempre el de mayor contraste y cae en blanco ante basura', () => {
+    // Fondo oscuro con ink oscura: gana blanco. Fondo claro con ink oscura: gana la ink.
+    assert.equal(C.cronoTextColor('#101010', '#202020'), '#ffffff');
+    assert.equal(C.cronoTextColor('#f0f0f0', '#202020'), '#202020');
+    // Basura: sin ink, hex inválido, null → blanco seguro, nunca lanza.
+    assert.equal(C.cronoTextColor('#8d6e63'), '#ffffff');
+    assert.equal(C.cronoTextColor('no-es-hex', '#123456'), '#ffffff');
+    assert.equal(C.cronoTextColor('#8d6e63', 'no-es-hex'), '#ffffff');
+    assert.equal(C.cronoTextColor(null, null), '#ffffff');
+    assert.equal(C.cronoTextColor(), '#ffffff');
+  });
+});
+
+describe('fix-crono-contrast: el tick y el CSS del contador', () => {
+  const src = publishedSource();
+  const tick = src.slice(src.indexOf('function tick() {'), src.indexOf('updateDecayTimeline(L);'));
+  // Bloques CSS del contador (base + override Baloo 2 + urgent).
+  const cssCrono = src.split('\n').filter((l) => /\.adhd-mini-crono(\.urgent)? \{/.test(l) || /^\s+(background|color|transition):/.test(l));
+
+  function lumHex(hex) {
+    const h = hex.replace('#', '');
+    const [r, g, b] = [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16) / 255)
+      .map((c) => (c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4)));
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  }
+
+  test('el tick ya no pinta el texto con el extremo del gradiente', () => {
+    assert.ok(tick.length > 100, 'no se encontró el tick del crono');
+    assert.equal(/miniCronoEl\.style\.color = R\.from/.test(src), false,
+      'el texto sigue tomando R.from: oscuro sobre oscuro');
+  });
+
+  test('el tick pinta la superficie del peldaño y el dígito emparejado', () => {
+    assert.equal(/style\.background = urgent \? CRONO_URGENT_BG : R\.from/.test(tick), true,
+      'el fondo no es urgente-rojo o el color del peldaño (el inline le gana a .urgent)');
+    assert.equal(/style\.color = urgent \? '#ffffff' : cronoTextColor\(R\.from, R\.ink\)/.test(tick), true,
+      'el dígito no usa el emparejamiento legible / urgent no fuerza blanco');
+  });
+
+  test('el rojo urgente es sólido y el blanco lo lee con ≥3:1', () => {
+    const m = src.match(/const CRONO_URGENT_BG = '(#[0-9a-fA-F]{6})'/);
+    assert.ok(m, 'falta CRONO_URGENT_BG');
+    const r = (1.05) / (lumHex(m[1]) + 0.05);
+    assert.ok(r >= 3, 'blanco sobre ' + m[1] + ' queda en ' + r.toFixed(2) + ':1');
+  });
+
+  test('el CSS del contador no usa fondos translúcidos y transiciona el fondo', () => {
+    const base = src.slice(src.indexOf('/* ===== Feature 1: mini cronómetro ===== */'));
+    const bloqueBase = base.slice(0, base.indexOf('}') + 1);
+    assert.equal(/rgba\(/.test(bloqueBase), false, 'el CSS base del crono sigue con un fondo rgba()');
+    assert.equal(/\.adhd-mini-crono\.urgent \{[^}]*rgba\(/.test(src), false,
+      '.urgent sigue translúcido (color sobre color)');
+    assert.equal(/\.adhd-mini-crono \{[^}]*transition:[^;}]*background/.test(base), true,
+      'la transición no cubre el fondo: el cambio de peldaño sería un salto');
   });
 });
