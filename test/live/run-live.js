@@ -284,8 +284,12 @@ async function modoAtendido(page, errors) {
   // viva: el veredicto ingenuo dio FALLA por dos 404 que no eran nuestros.
   const errors = [];
   const recursos = [];
-  context.on('pageerror', (e) => errors.push('pageerror: ' + (e && e.message)));
-  context.on('console', (m) => {
+  const page = context.pages()[0] || await context.newPage();
+  // Los errores se escuchan EN LA PAGINA, no en el contexto: 'pageerror' es
+  // evento de page (el contexto no lo re-emite) y atarlo al contexto es lo
+  // mismo que no escucharlo — verificado con sonda que tira a proposito.
+  page.on('pageerror', (e) => errors.push('pageerror: ' + (e && e.message)));
+  page.on('console', (m) => {
     if (m.type() !== 'error') return;
     const t = m.text();
     if (/^Failed to load resource/i.test(t)) recursos.push(t.slice(0, 200));
@@ -303,7 +307,6 @@ async function modoAtendido(page, errors) {
   // el error real en vez de callarse.
   const inyeccion = stubs + '\n' + published;
 
-  const page = context.pages()[0] || await context.newPage();
   await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
   // Si pediste /learn o una leccion y caiste en la landing (/), no hay sesion
   // valida en el perfil: el probe no te loguea solo. Ver el flujo en --help.
