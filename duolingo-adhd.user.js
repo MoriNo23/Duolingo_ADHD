@@ -971,8 +971,10 @@ window.CrystalReward=CrystalReward;
   // calm-canvas-grayscale: copia en grises del sprite de Duo, centrada en el
   // anchor del ramp de super. Devuelve canvas (fuente valida para drawImage,
   // sin async: el sprite ya esta cargado cuando se llama desde burst()).
-  // Cada pixel conserva su alfa y su sombreado relativo, pero en el eje
-  // neutro: ningun pixel resultante tiene tono.
+  // Cada pixel conserva su alfa y su sombreado RELATIVO a la media del sprite:
+  // los claros quedan sobre el anchor y los oscuros debajo, asi la media de lo
+  // pintado cae EN el anchor (la presentacion lleva el valor del ramp, no uno
+  // derivado del contenido del sprite). Ningun pixel resultante tiene tono.
   function greySprite(img, anchor) {
     const m = /^#([0-9a-fA-F]{2})/.exec(anchor || '');
     const A = m ? parseInt(m[1], 16) : 160;
@@ -980,10 +982,17 @@ window.CrystalReward=CrystalReward;
     cv.width = img.naturalWidth || img.width; cv.height = img.naturalHeight || img.height;
     const g = cv.getContext('2d'); g.drawImage(img, 0, 0);
     const d = g.getImageData(0, 0, cv.width, cv.height), px = d.data;
-    for (let i = 0; i < px.length; i += 4) {
+    let sum = 0, n = 0, i;
+    for (i = 0; i < px.length; i += 4) {
+      if (!px[i + 3]) continue;
+      sum += (0.2126 * px[i] + 0.7152 * px[i + 1] + 0.0722 * px[i + 2]) / 255;
+      n++;
+    }
+    const media = n ? sum / n : 1;   // sprite sin pixeles opacos: mapping neutro
+    for (i = 0; i < px.length; i += 4) {
       if (!px[i + 3]) continue;
       const L = (0.2126 * px[i] + 0.7152 * px[i + 1] + 0.0722 * px[i + 2]) / 255;
-      const v = Math.max(0, Math.min(255, Math.round(A * (0.30 + 0.70 * L))));
+      const v = Math.max(0, Math.min(255, Math.round(A * (media > 0 ? L / media : 1))));
       px[i] = px[i + 1] = px[i + 2] = v;
     }
     g.putImageData(d, 0, 0);
@@ -1025,10 +1034,10 @@ window.CrystalReward=CrystalReward;
       // calm-canvas-grayscale: este efecto sirve al peldano super (5) y nada
       // mas (FX_BY_RUNG). En calma: sprite en grises + particulas en dos tonos
       // del anchor. Sin calma, los colores de siempre.
+      const reduced=this.reduced;
       const G5 = reduced ? calmGreyFor(5) : null;
       if (reduced && !this.greyCanvas && G5) this.greyCanvas = greySprite(this.image, G5);
       const scale=clamp(Math.min(this.w/850,this.h/620),.45,1.2);
-      const reduced=this.reduced;
       const life=reduced?700:Math.max(500,duration);
       const run={x,y,start:performance.now(),life,particles:[],scale};
       const add=(type,n)=>{
@@ -1048,7 +1057,7 @@ window.CrystalReward=CrystalReward;
           run.particles.push({type,delay:reduced?0:rand(0,.13),tx,ty,
             size:type==='owl'?owlSize:rand(3,8)*scale,
             angle:rand(-.55,.55),spin:rand(-1.5,1.5),phase:rand(0,Math.PI*2),
-            color:reduced ? (G5 && Math.random() < .5 ? G5 : shadeGrey(G5 || '#888888', .6)) : colors[Math.floor(rand(0,colors.length))],
+            color:reduced ? (G5 && Math.random() < .5 ? G5 : shadeGrey(G5 || '#888888', .85)) : colors[Math.floor(rand(0,colors.length))],
             end:rand(.86,1),spread:rand(.48,.72)});
         }
       };
