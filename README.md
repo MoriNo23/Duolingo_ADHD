@@ -4,7 +4,7 @@
 
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![Tampermonkey](https://img.shields.io/badge/tampermonkey-userscript-green)](https://www.tampermonkey.net/)
-[![Version](https://img.shields.io/badge/version-2.20.0-orange)](https://greasyfork.org/es-419/scripts/590127)
+[![Version](https://img.shields.io/badge/version-2.21.0-orange)](https://greasyfork.org/es-419/scripts/590127)
 [![GreasyFork](https://img.shields.io/badge/Greasy%20Fork-Install%20Now-4ca64c)](https://greasyfork.org/es-419/scripts/590127-duolingo-adhd-progress-bar-milestones-for-the-easily-distracted-bored)
 
 </div>
@@ -114,6 +114,20 @@ Each one has its own toggle, and with everything off the script keeps no timer a
 
 **No network requests.** The seven cues are embedded in the script as base64 `data:` URIs, so they load instantly, work offline and can't be blocked by an extension.
 
+### Desktop notification when the tab is hidden
+
+A reminder that falls due while the tab is **in the background** escalates to a **system notification**. The reason is structural: the browser throttles a hidden tab's timers down to about one wake per minute, so a page-scheduled sound cannot reach you on time — but the operating system's notification channel can. The notification is silent in itself; if the page's audio is alive, the script's own cue sounds along with it, so the notice doesn't depend on your OS volume.
+
+- It's the **userscript manager** (Tampermonkey), never duolingo.com, that shows the notification — the site is never asked for a notification permission, and no prompt is ever attributed to it.
+- It ships **on by default**, like the sounds. One click in **Settings → Sound** turns it off; with it off, a hidden reminder simply waits and plays at most once when you come back — exactly as before this feature existed.
+- In managers without `GM_notification` (Violentmonkey, Greasemonkey, Safari), the toggle degrades silently to that same old behaviour: nothing breaks, the reminder stays pending until you return.
+
+**If nothing shows even with the toggle on**, the OS is almost always the one silencing it — and the panel says so: the Sound section shows a red note when the last notification wasn't delivered. How to unblock it:
+
+- **GNOME / Linux:** *Settings → Notifications* — turn off **Do Not Disturb** and make sure notifications are enabled for your browser. On minimal setups with no notification daemon (some window managers), install and enable one (`mako`, `dunst`) — nothing can be shown without it.
+- **Windows:** *Settings → System → Notifications* — notifications on, and check that **Focus Assist / Do Not Disturb** is not suppressing them, and that your browser isn't in the per-app block list.
+- The browser itself can block them too: in `chrome://settings/content/notifications`, the userscript manager's entry must not be blocked.
+
 ### Replacing a sound (ElevenLabs prompts)
 
 Every cue has two interchangeable sources, in this order:
@@ -186,6 +200,7 @@ Suggestions for any of these are welcome — see below.
 
 - **A personal userscript, not an official product.** Made by one person, for personal use, in the context of language learning. Not affiliated with, endorsed by, or supported by Duolingo.
 - **Nothing leaves your browser.** There is no server, no account and no analytics. Your settings and journal live in the userscript manager's local storage and stay on your machine. Clearing the script's storage deletes them permanently.
+- **The reminder's desktop notification is local too.** It is emitted by the userscript manager (`GM_notification`), not by duolingo.com: the site is never asked for a notification permission, no permission prompt is attributed to it, and nothing about you or your session leaves the browser — the operating system only ever receives the short text you see on screen.
 - **The only network request** the script makes is fetching the Baloo 2 font used by the chronometer, and it fails gracefully to a system font if that request is blocked.
 - **The sounds are self-contained.** The seven cues (tier fanfare + reminder) are embedded in the script file itself as `data:` URIs; no audio is downloaded, ever.
 - **The reward effects are self-contained.** The three celebration effects are bundled canvas animations with no external requests; the Super effect embeds a small sprite of the Duo character that you supplied.
@@ -198,6 +213,8 @@ Suggestions for any of these are welcome — see below.
 **2. Install the script** from Greasy Fork:
 
 > **https://greasyfork.org/es-419/scripts/590127**
+
+**Heads-up:** when you install (or update to) a version with the desktop reminder, Tampermonkey asks once for the **notifications permission** — that's the manager asking, not duolingo.com. Allow it if you want reminders to reach you while the tab is in the background; denying it simply leaves the audible-only path.
 
 **3. Open any lesson or practice session** on Duolingo. The bar segments itself. Click the tab on the right edge to change settings.
 

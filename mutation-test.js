@@ -78,6 +78,14 @@ const MUTATORS = [
   // (0.5 parte al medio) lo mata.
   c => firstReplace(c, /const CALM_GREYS = \{ 3: '#565656', 4: '#9e9e9e', 5: '#e2e2e2' \};/, "const CALM_GREYS = { 3: '#808080', 4: '#808080', 5: '#808080' };", 'calmGreyFor: ramp colapsado a un gris unico'),
   c => firstReplace(c, /Math\.round\(parseInt\(hex\.slice\(i, i \+ 2\), 16\) \* f\)/, 'Math.round(parseInt(hex.slice(i, i + 2), 16))', 'shadeGrey: factor ignorado (identidad)'),
+  // reminder-desktop-notification: si la rama notify se elimina, oculto con
+  // notificación activada vuelve a caer en pendiente silencioso — los dos
+  // tests del contrato (notify en oculto, y el de 30 min) lo matan.
+  c => firstReplace(c, /state\.notifEnabled === true \? 'notify' : 'pending'/, "'pending'", 'reminderAction: rama notify eliminada'),
+  // Si el estado bloqueado se reporta como éxito (el aviso se esconde), el
+  // panel miente — el pin estructural del render (notifBlocked y
+  // notifUnsupported en el cuerpo de renderNotifStatus) lo mata.
+  c => firstReplace(c, /el\.textContent = tr\(cfg\.lang, notifDeliveryState === 'blocked' \? 'notifBlocked' : 'notifUnsupported'\);/, "el.style.display = 'none';", 'renderNotifStatus: mensaje de bloqueado forzado al texto de éxito'),
 ];
 
 // ---------- correr los tests contra el SRC actual ----------

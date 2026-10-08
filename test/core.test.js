@@ -1698,10 +1698,11 @@ describe('add-field-qa-loop: plantilla del guion de campo', () => {
     assert.equal(/url\(https?:/.test(html), false, 'importa CSS externo');
   });
 
-  test('el smoke fijo viene pre-impreso con sus 8 items', () => {
+  test('el smoke fijo viene pre-impreso con sus 9 items', () => {
     const html = plantillaSrc();
     for (const id of ['smoke-boot', 'smoke-barra', 'smoke-riel', 'smoke-panel',
-                      'smoke-sonido', 'smoke-motion', 'smoke-recordatorio', 'smoke-journal']) {
+                      'smoke-sonido', 'smoke-motion', 'smoke-recordatorio', 'smoke-journal',
+                      'smoke-notif']) {
       assert.equal(html.includes('data-q="' + id + '"'), true, 'falta el smoke ' + id);
     }
   });
