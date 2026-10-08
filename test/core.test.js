@@ -1672,6 +1672,124 @@ describe('reminder-desktop-notification: el panel falla visible', () => {
   });
 });
 
+describe('tier-motion-per-seg: el eje por peldaño (tierMotionFor)', () => {
+  const src = publishedSource();
+  const RUNGS = [0, 1, 2, 3, 4, 5];
+  const FLOORS = [3, 4, 5, 6];
+
+  test('calma gobernando (never, o system con reduce): TODO peldaño resuelve reduced, sin excepción, incluido Super', () => {
+    // El requirement de accesibilidad. La decisión de motion existente ya
+    // resolvió calma: el eje por peldaño no puede elegir MÁS movimiento que
+    // eso — ningún valor del piso re-anima nada.
+    for (const level of ['never', 'system']) {
+      const reduce = level === 'system';   // never calma siempre; system calma si el sistema pide
+      for (const rung of RUNGS) {
+        for (const floor of FLOORS) {
+          assert.equal(C.tierMotionFor({ level, reduce, rung, floor }), 'reduced',
+            `level=${level} reduce=${reduce} rung=${rung} piso=${floor}`);
+        }
+      }
+    }
+  });
+
+  test('motion permitido (always, o system sin reduce): los bajos nunca ganan canvas; los altos animan desde el piso', () => {
+    const permitidos = [
+      { level: 'always', reduce: false },
+      { level: 'always', reduce: true },   // 'always' ignora el reduce: contrato existente
+      { level: 'system', reduce: false },
+    ];
+    for (const { level, reduce } of permitidos) {
+      for (const rung of [0, 1, 2]) {
+        for (const floor of FLOORS) {
+          assert.equal(C.tierMotionFor({ level, reduce, rung, floor }), 'off',
+            `bajo: level=${level} reduce=${reduce} rung=${rung} piso=${floor}`);
+        }
+      }
+      for (const rung of [3, 4, 5]) {
+        for (const floor of FLOORS) {
+          assert.equal(C.tierMotionFor({ level, reduce, rung, floor }),
+            rung >= floor ? 'animated' : 'off',
+            `alto: level=${level} reduce=${reduce} rung=${rung} piso=${floor}`);
+        }
+      }
+    }
+  });
+
+  test('ni el piso más bajo re-anima a Super bajo calma del sistema', () => {
+    assert.equal(C.tierMotionFor({ level: 'system', reduce: true, rung: 5, floor: 3 }), 'reduced');
+    assert.equal(C.tierMotionFor({ level: 'never', reduce: false, rung: 5, floor: 3 }), 'reduced');
+  });
+
+  test('la precedencia es estructural: el eje no aparece en el camino que ya resolvió calma', () => {
+    // Un assert sobre el ORDEN de las decisiones, no solo del resultado: es lo
+    // que impide un futuro "dejamos que el usuario lo fuerce" que rompería la
+    // accesibilidad en silencio (tasks 1.2).
+    const i = src.indexOf('function tierMotionFor(');
+    assert.ok(i > -1, 'falta tierMotionFor()');
+    const cuerpo = src.slice(i, i + 600);
+    const reducedAt = cuerpo.indexOf("return 'reduced'");
+    const ejeAt = cuerpo.indexOf('floor');
+    assert.ok(reducedAt > -1, 'no hay camino de calma en tierMotionFor');
+    assert.ok(ejeAt > -1, 'no se menciona el piso en tierMotionFor');
+    assert.ok(reducedAt < ejeAt,
+      'el eje por peldaño aparece ANTES del return de calma: la precedencia quedó al revés');
+  });
+
+  test('valor desconocido del piso cae al default enviado (3): config vieja, editada a mano o corrupta', () => {
+    // El contrato de la spec reward-fx: "an unrecognised stored value SHALL
+    // fall back to the shipped default rather than leaving the effects in an
+    // undefined state". El default es el comportamiento de siempre: los tres
+    // peldaños altos animan.
+    const basura = [undefined, null, 'garbage', NaN, 99, 3.5, -1, {}];
+    for (const floor of basura) {
+      for (const rung of [3, 4, 5]) {
+        assert.equal(C.tierMotionFor({ level: 'always', reduce: false, rung, floor }), 'animated',
+          `piso=${String(floor)} rung=${rung}: basura debe caer al default (3), no a estado indefinido`);
+      }
+    }
+    // Y el default no es "todo apagado": la basura no puede dejar los efectos
+    // sin canvas (seguirían "funcionando", no mudos).
+    assert.equal(C.tierMotionFor({ level: 'always', reduce: false, rung: 3, floor: undefined }), 'animated');
+  });
+});
+
+describe('tier-motion-per-seg: el control del panel', () => {
+  const src = publishedSource();
+
+  test('el select del eje existe con id estable, persiste via setCfg y usa el fallback del 1.4', () => {
+    assert.equal(/id="adhd-tier-motion"/.test(src), true,
+      'falta el select del eje con id estable');
+    const i = src.indexOf("querySelector('#adhd-tier-motion')");
+    assert.ok(i > -1, 'falta el listener del select del eje');
+    const cuerpo = src.slice(i, i + 500);
+    assert.equal(/setCfg\('tierMotionFloor',/.test(cuerpo), true,
+      'el select no persiste el piso');
+    assert.equal(/clampTierMotionFloor/.test(cuerpo), true,
+      'el listener no valida contra el fallback del 1.4: basura editada a mano se persistiría');
+  });
+
+  test('las etiquetas del eje existen en las dos variantes (EN/ES)', () => {
+    for (const lang of ['es', 'en']) {
+      assert.ok(C.I18N[lang].lblTierMotion, `falta lblTierMotion (${lang})`);
+      assert.ok(C.I18N[lang].hintTierMotion, `falta hintTierMotion (${lang})`);
+      for (const k of ['tierMotionRacha', 'tierMotionDiamante', 'tierMotionSuper', 'tierMotionNone']) {
+        assert.ok(C.I18N[lang][k], `falta ${k} (${lang})`);
+      }
+    }
+  });
+
+  test('el select muestra las cuatro opciones y marca la actual desde cfg', () => {
+    const i = src.indexOf('id="adhd-tier-motion"');
+    assert.ok(i > -1, 'falta el select en el markup');
+    const cuerpo = src.slice(i, i + 800);
+    for (const v of ['value="3"', 'value="4"', 'value="5"', 'value="6"']) {
+      assert.equal(cuerpo.includes(v), true, `falta la opción ${v} del eje`);
+    }
+    assert.equal(/cfg\.tierMotionFloor === 3 \? ' selected' : ''/.test(cuerpo), true,
+      'el select no marca la opción actual desde cfg.tierMotionFloor');
+  });
+});
+
 describe('add-field-qa-loop: plantilla del guion de campo', () => {
   const plantillaPath = path.join(__dirname, '..', 'qa', 'plantilla-guion.html');
 

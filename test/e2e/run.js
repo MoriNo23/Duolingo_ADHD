@@ -31,6 +31,10 @@ const ROUTES = [
   { path: '/lesson/', expectLesson: true, kind: 'animated' },
   { path: '/lesson/calm-system/', expectLesson: true, kind: 'calm' },
   { path: '/lesson/calm-never/', expectLesson: true, kind: 'calm' },
+  // tier-motion-per-seg: motion permitido con el piso en 5 — solo Super
+  // celebra con canvas. Las aserciones genéricas por peldaño no aplican (dos
+  // de los tres efectos no deben existir): las suyas van aparte, en main.
+  { path: '/lesson/tier5/', expectLesson: true, kind: 'animated', tierAxis: true },
   // Ruta aparte para el fin de vida real: el cambio de pathname destruye el riel,
   // asi que mezclarlo con el recorrido de vueltas no puede dar una lectura clara.
   { path: '/lesson/navonly/', expectLesson: true, kind: 'animated', navOnly: true },
@@ -136,7 +140,7 @@ function assert(results, name, cond, detail) {
   results.push({ name, pass: !!cond, detail: detail === undefined ? '' : String(detail) });
 }
 
-function checkReport(rep, results, { expectLesson, kind = 'none', navOnly = false }) {
+function checkReport(rep, results, { expectLesson, kind = 'none', navOnly = false, tierAxis = false }) {
   if (!rep || rep.parseError) {
     assert(results, 'el fixture produjo un reporte', false,
       rep ? 'JSON ilegible: ' + rep.parseError : 'no se encontro el <pre id="adhd-e2e-report">');
@@ -338,6 +342,10 @@ function checkReport(rep, results, { expectLesson, kind = 'none', navOnly = fals
     // leccion (que Duolingo hace al responder) NO puede matar un efecto en vuelo.
     assert(results, 'el harness re-rendro la barra con un efecto en pantalla',
       rep.fxBarSwapOk === true, 'swap=' + rep.fxBarSwapOk);
+    // tier-motion-per-seg: en la ruta del eje solo un canvas enciende, así que
+    // los asserts genéricos por peldaño (que exigen los tres) no aplican —
+    // los suyos viven en main, con el conteo exacto.
+    if (!tierAxis) {
     for (const tier of ['racha', 'diamante', 'super']) {
       const f = fx.find((x) => x.tier === tier) || {};
       const enVuelo = tier === rep.fxBarSwapTier;
@@ -353,6 +361,7 @@ function checkReport(rep, results, { expectLesson, kind = 'none', navOnly = fals
       }
     }
     }
+    }
     // Y el otro lado: un fin de vida real (cambio de path) tiene que seguir
     // limpiando, o la suite se podria satisfacer con "nunca destruyo nada".
     if (navOnly) {
@@ -362,6 +371,9 @@ function checkReport(rep, results, { expectLesson, kind = 'none', navOnly = fals
     }
     if (!navOnly) {
       const fx2 = Array.isArray(rep.fx) ? rep.fx : [];
+      // tier-motion-per-seg: la ruta del eje no pasa por los tres peldaños
+      // genéricos — dos de ellos no deben existir. Sus asserts viven en main.
+      if (!tierAxis) {
       for (const tier of ['racha', 'diamante', 'super']) {
         const f = fx2.find((x) => x.tier === tier) || {};
         // "¿Se movio la figura?": fraccion de la mascara que cambio entre el
@@ -377,6 +389,7 @@ function checkReport(rep, results, { expectLesson, kind = 'none', navOnly = fals
             f.steadyFrames >= 3 && f.shapeChange <= 0.02,
             'cambio de forma=' + f.shapeChange);
         }
+      }
       }
     }
   } else {
@@ -487,6 +500,32 @@ async function main() {
     // peldaño tiene el suyo. Solo aca: en la ruta animada el color es lo correcto.
     checkCalmGrey(reports['/lesson/calm-system/'], results, 'reduce del sistema');
     checkCalmGrey(reports['/lesson/calm-never/'], results, 'nivel never');
+
+    // tier-motion-per-seg: el eje por peldaño en vivo. Con el piso en 5 y el
+    // movimiento permitido, solo Super enciende canvas — Racha y Diamante no
+    // aparecen (el wiring corta antes de construir) y el único que enciende SE
+    // MUEVE: la animación queda como la marca de lo ganado. El patrón de
+    // medición es el de siempre: cambio de forma en la meseta, no conteo de
+    // nodos.
+    const t5 = reports['/lesson/tier5/'];
+    const t5fx = (t5 && Array.isArray(t5.fx)) ? t5.fx : [];
+    assert(results, 'con el piso en 5 solo Super enciende canvas (racha y diamante quedan afuera)',
+      t5fx.length === 1,
+      'efectos=' + t5fx.length + ' [' + t5fx.map((x) => x.tier).join(',') + ']');
+    assert(results, 'y el único canvas que enciende se mueve (la recompensa sigue viva)',
+      t5fx.length === 1 && t5fx[0].steadyFrames >= 3 && t5fx[0].shapeChange >= 0.1,
+      'cambio de forma=' + (t5fx[0] && t5fx[0].shapeChange));
+    assert(results, 'la ruta animada de siempre sigue encendiendo los tres',
+      ((reports['/lesson/'] && reports['/lesson/'].fx) || []).length === 3,
+      'efectos=' + ((reports['/lesson/'] && reports['/lesson/'].fx) || []).length);
+    // Precedencia en vivo: calm-never lleva el piso sembrado en 5 y los tres
+    // efectos calmados siguen presentes e idénticos — el eje es inerte bajo
+    // calma (spec motion-preference: "observably inert").
+    const cn = reports['/lesson/calm-never/'];
+    const cnfx = (cn && Array.isArray(cn.fx)) ? cn.fx : [];
+    assert(results, 'bajo calma el piso es inerte: los tres efectos calmados siguen presentes',
+      cn.tierFloorSeeded === 5 && cnfx.length === 3,
+      'efectos=' + cnfx.length + ' pisoSembrado=' + cn.tierFloorSeeded);
     // (la ruta navonly no corre la fase de efectos: no entra en las comparaciones)
   } finally {
     server.close();

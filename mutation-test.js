@@ -86,6 +86,16 @@ const MUTATORS = [
   // panel miente — el pin estructural del render (notifBlocked y
   // notifUnsupported en el cuerpo de renderNotifStatus) lo mata.
   c => firstReplace(c, /el\.textContent = tr\(cfg\.lang, notifDeliveryState === 'blocked' \? 'notifBlocked' : 'notifUnsupported'\);/, "el.style.display = 'none';", 'renderNotifStatus: mensaje de bloqueado forzado al texto de éxito'),
+  // tier-motion-per-seg: si la precedencia se invierte (el eje corre aunque la
+  // calma ya resolvió), la matriz de 1.1 lo mata: bajo calma todo peldaño debe
+  // resolver 'reduced', incluido Super.
+  c => firstReplace(c, /if \(resolveMotion\(state\.level, state\.reduce\)\) return 'reduced';/, "if (false) return 'reduced';", 'tierMotionFor: precedencia invertida (reduced ignorado)'),
+  // Si el eje colapsa a constante, los pisos de la matriz (racha bajo piso 4
+  // debe quedar 'off') y el guard del panel lo matan.
+  c => firstReplace(c, /state\.rung >= clampTierMotionFloor\(state\.floor\) \? 'animated' : 'off'/, "'animated'", 'tierMotionFor: eje colapsado a constante'),
+  // Sin el fallback, la basura del 1.4 (piso undefined/NaN/editado a mano)
+  // deja los efectos en estado indefinido: su propio test lo mata.
+  c => firstReplace(c, /return \(v === 3 \|\| v === 4 \|\| v === 5 \|\| v === 6\) \? v : DEFAULTS\.tierMotionFloor;/, 'return v;', 'clampTierMotionFloor: fallback eliminado (identidad)'),
 ];
 
 // ---------- correr los tests contra el SRC actual ----------

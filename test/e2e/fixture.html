@@ -80,7 +80,14 @@
   window.__motionSeeded = seed.indexOf('calm-system') !== -1 ? 'system'
     : seed.indexOf('calm-never') !== -1 ? 'never'
     : seed.indexOf('not-a-lesson') !== -1 ? 'never' : 'always';
-  store.adhd_config = { lang: 'es', timerMode: true, timerMinutes: 0, timerSeconds: __GOAL__, motionLevel: window.__motionSeeded };
+  // tier-motion-per-seg: el piso por peldaño sembrado por ruta. 'tier5' ->
+  // solo Super celebra con canvas (racha y diamante quedan bajo el piso).
+  // calm-never SIEMBRA piso 5 a propósito: la ruta calmada tiene que mostrar
+  // los tres efectos igual — el piso es observablemente inerte bajo calma
+  // (spec motion-preference: "the change is observably inert").
+  window.__tierFloorSeeded = seed.indexOf('tier5') !== -1 ? 5
+    : seed.indexOf('calm-never') !== -1 ? 5 : 3;
+  store.adhd_config = { lang: 'es', timerMode: true, timerMinutes: 0, timerSeconds: __GOAL__, motionLevel: window.__motionSeeded, tierMotionFloor: window.__tierFloorSeeded };
 
   // Reloj controlable: __t se avanza desde el reporte.
   var realNow = Date.now;
@@ -241,6 +248,7 @@
       // control del panel se prueba en el core contra el fuente publicado; aca
       // se prueba el efecto real sobre <body>, que es lo que se ve.
       motionSeeded: window.__motionSeeded,
+      tierFloorSeeded: window.__tierFloorSeeded,
       motionOffClass: document.body.classList.contains('adhd-motion-off'),
       rmReduce: window.__rmReduce,
       rmReduceReal: window.__rmReduceReal,

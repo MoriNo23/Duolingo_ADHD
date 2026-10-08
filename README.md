@@ -4,7 +4,7 @@
 
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![Tampermonkey](https://img.shields.io/badge/tampermonkey-userscript-green)](https://www.tampermonkey.net/)
-[![Version](https://img.shields.io/badge/version-2.21.0-orange)](https://greasyfork.org/es-419/scripts/590127)
+[![Version](https://img.shields.io/badge/version-2.22.0-orange)](https://greasyfork.org/es-419/scripts/590127)
 [![GreasyFork](https://img.shields.io/badge/Greasy%20Fork-Install%20Now-4ca64c)](https://greasyfork.org/es-419/scripts/590127-duolingo-adhd-progress-bar-milestones-for-the-easily-distracted-bored)
 
 </div>

@@ -2,7 +2,7 @@
 // @name           Duolingo ADHD — Progress bar milestones (for the easily distracted / bored)
 // @name:es        Duolingo ADHD — Hitos de barra de progreso (para los que se aburren / se distraen)
 // @namespace      https://github.com/MoriNo23/duolingo-adhd
-// @version        2.21.0
+// @version        2.22.0
 // @description    Divide la barra de progreso de la lección en tramos. Modo tiempo: cada tramo arranca en Super y cada vez que el riel se agota baja un peldaño (Super→Madera); el peldaño en que cierres el tramo queda congelado. Cerrá rápido para congelar mejor jerarquía. Recompensas a pantalla completa en peldaños altos (Racha/Diamante/Super), cronómetro Baloo 2, diario local + panel EN/ES. Con sonido: fanfarria por peldaño y recordatorio periódico (Ajustes → Sonido). Mantiene el diseño nativo de Duolingo.
 // @description:en Splits the lesson progress bar into segments. Timer mode: every segment starts at the top tier (Super) and each time the rail runs out it drops one tier (Super→Wood) — the tier you close the segment on gets frozen. Close fast to freeze a better tier. Full-screen reward effects on high tiers (Streak/Diamond/Super), Baloo 2 clock, local journal + EN/ES settings. With sound: a tier fanfare on every segment close plus a periodic reminder (Settings → Sound). Keeps Duolingo's native design.
 // @description:es Divide la barra de progreso de la lección en tramos. Modo tiempo: cada tramo arranca en el nivel Super y va bajando de peldaño (Madera→Super) mientras se quema el presupuesto — cerrá rápido para congelar mejor jerarquía. Efectos de recompensa a pantalla completa en los peldaños altos (Racha/Diamante/Super), partículas, cronómetro Baloo 2, diario local + panel EN/ES. Con sonido: fanfarria por peldaño y recordatorio periódico (Ajustes → Sonido). Mantiene el diseño nativo de Duolingo.
@@ -91,6 +91,12 @@ const DEFAULTS = {
   // sigue a un click: 'system' = respetar la preferencia del escritorio, 'never' =
   // apagarlas siempre. Un config que YA tiene nivel guardado lo conserva.
   motionLevel: 'always',
+  // tier-motion-per-seg: desde qué peldaño el canvas celebra animado cuando
+  // el movimiento está permitido (3=racha, 4=diamante, 5=super, 6=ninguno).
+  // Default 3 = el comportamiento de siempre: los tres altos animan y los
+  // bajos nunca tuvieron canvas. Una config guardada antes de este cambio
+  // la conserva (Object.assign solo completa lo faltante).
+  tierMotionFloor: 3,
   // rail-fixed-lap-ceiling: la clave `timerHardness` ya no se lee ni se escribe.
   // Sigue en DEFAULTS para que los cfgs guardados sigan cargando sin romper.
   timerHardness: 35,
@@ -160,6 +166,13 @@ const I18N = {
     motionSystem:    'Respetar sistema',
     motionAlways:    'Siempre',
     motionNever:     'Nunca',
+    // tier-motion-per-seg: desde qué peldaño el cierre celebra con animación
+    lblTierMotion:   'Celebración animada',
+    tierMotionRacha:    'Racha, Diamante y Super',
+    tierMotionDiamante: 'Diamante y Super',
+    tierMotionSuper:     'Solo Super',
+    tierMotionNone:      'Ninguna (solo partículas)',
+    hintTierMotion:  'Con el movimiento permitido, desde qué peldaño el cierre celebra con animación en pantalla. Los peldaños por debajo solo disparan las partículas. Si tu sistema pide calma, nada se mueve pase lo que pongas acá.',
     // audio-cues: sección SONIDO del panel
     secSonido:       'Sonido',
     lblSoundCues:    'Sonidos por peldaño',
@@ -218,6 +231,13 @@ const I18N = {
     motionSystem:    'Respect system',
     motionAlways:    'Always',
     motionNever:     'Never',
+    // tier-motion-per-seg: from which tier a closure celebrates with animation
+    lblTierMotion:   'Animated celebration',
+    tierMotionRacha:    'Streak, Diamond and Super',
+    tierMotionDiamante: 'Diamond and Super',
+    tierMotionSuper:     'Super only',
+    tierMotionNone:      'None (particles only)',
+    hintTierMotion:  'With motion allowed, from which tier a closure celebrates with a full-screen animation. Tiers below it only fire the particles. If your system asks for calm, nothing moves no matter what you set here.',
     // audio-cues: sound section of the panel
     secSonido:       'Sound',
     lblSoundCues:    'Tier sounds',
@@ -374,6 +394,35 @@ function resolveMotion(level, systemReduced) {
 }
 
 const MOTION_LEVELS = ['system', 'always', 'never'];
+
+// tier-motion-per-seg: el eje por peldaño. La decisión resuelta del PAR:
+// motionLevel dice SI puede haber movimiento (resolveMotion, contrato que no
+// se toca); el piso dice DESDE qué peldaño el canvas celebra animado cuando
+// el movimiento está permitido. Salidas: 'reduced' (la presentación calmada
+// de siempre — gris, quieta), 'animated' (el canvas completo) y 'off' (este
+// peldaño no celebra con canvas: solo el burst de CSS de siempre).
+// Accesibilidad primero y sin excepción (spec motion-preference): si la
+// decisión de motion ya resolvió calma, TODO peldaño resuelve 'reduced' y el
+// eje no aparece en ese camino — ningún valor elegido puede re-habilitar
+// movimiento que el usuario o el sistema pidieron suprimir. El eje solo
+// elige MÁS animación dentro del rango ya permitido.
+function tierMotionFor(state) {
+  if (!state) return 'off';
+  if (resolveMotion(state.level, state.reduce)) return 'reduced';
+  // Movimiento permitido: los peldaños bajos nunca ganan efecto canvas
+  // (spec reward-fx: "the lower tiers SHALL NOT gain a canvas effect").
+  if (!Number.isInteger(state.rung) || state.rung < 3) return 'off';
+  return state.rung >= clampTierMotionFloor(state.floor) ? 'animated' : 'off';
+}
+
+// tier-motion-per-seg: el piso reconocido. Solo 3/4/5/6 son valores válidos
+// (racha / diamante / super / ninguno); cualquier otra cosa — config vieja,
+// editada a mano, corrupta — cae al default enviado, que es el comportamiento
+// de siempre. Nunca deja los efectos en estado indefinido (spec reward-fx:
+// "an unrecognised stored value SHALL fall back to the shipped default").
+function clampTierMotionFloor(v) {
+  return (v === 3 || v === 4 || v === 5 || v === 6) ? v : DEFAULTS.tierMotionFloor;
+}
 
 function getTimerGoalMs(cfg) {
   return (cfg.timerMinutes * 60 + cfg.timerSeconds) * 1000;
@@ -659,6 +708,8 @@ const CORE = {
   getTimerGoalMs,
   // animations-panel-setting: resolucion de la preferencia de animacion
   resolveMotion, MOTION_LEVELS,
+  // tier-motion-per-seg: el eje por peldaño
+  tierMotionFor, clampTierMotionFloor,
   // Feature 3: journal
   loadJournal, saveJournal, todayKey, initJournal, getJournal,
   recordLesson, recordSeparators, recordRaceTime, resetJournal,
@@ -2740,6 +2791,14 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
       if (!cfg.timerShowLabel) return;          // interruptor del panel
       const name = FX_BY_RUNG[rung];
       if (!name) return;                          // peldaños bajos: sin FX
+      // tier-motion-per-seg: el eje por peldaño, JUNTO al reduced que ya
+      // existe (fxOpts sigue decidiendo la presentación calmada; esto no
+      // toca el contrato de resolveMotion ni la clase del body). 'off' =
+      // este peldaño no celebra con canvas — solo el burst de CSS de siempre;
+      // 'reduced' llega al constructor como reduced=true por fxOpts, igual
+      // que antes. Sin reload: cada cierre lee cfg.tierMotionFloor en vivo.
+      const sys = typeof matchMedia === 'function' ? matchMedia(REDUCED_MQ).matches : false;
+      if (tierMotionFor({ level: cfg.motionLevel, reduce: sys, rung, floor: cfg.tierMotionFloor }) === 'off') return;
       const now = Date.now();
       if (now - (fxLastFire[name] || 0) < FX_MIN_GAP_MS) return;
       fxLastFire[name] = now;
@@ -3386,6 +3445,14 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
           </select>
           <div class="adhd-hint">${tr(cfg.lang, 'hintMotion')}</div>
           ${motionAskedBySystem() ? `<div class="adhd-hint" id="adhd-motion-system-hint">${tr(cfg.lang, 'hintMotionSystem')}</div>` : ''}
+          <label for="adhd-tier-motion">${tr(cfg.lang, 'lblTierMotion')}</label>
+          <select id="adhd-tier-motion">
+            <option value="3"${cfg.tierMotionFloor === 3 ? ' selected' : ''}>${tr(cfg.lang, 'tierMotionRacha')}</option>
+            <option value="4"${cfg.tierMotionFloor === 4 ? ' selected' : ''}>${tr(cfg.lang, 'tierMotionDiamante')}</option>
+            <option value="5"${cfg.tierMotionFloor === 5 ? ' selected' : ''}>${tr(cfg.lang, 'tierMotionSuper')}</option>
+            <option value="6"${cfg.tierMotionFloor === 6 ? ' selected' : ''}>${tr(cfg.lang, 'tierMotionNone')}</option>
+          </select>
+          <div class="adhd-hint">${tr(cfg.lang, 'hintTierMotion')}</div>
           </div>
         </details>
       `;
@@ -3493,6 +3560,20 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
         aplicarMotion();
       });
 
+      // tier-motion-per-seg: el eje por peldaño persiste igual que el nivel.
+      // Sin reload y sin tocar instancias: el próximo cierre lee cfg en vivo,
+      // y el `reduced` congelado en cada constructor no depende del piso.
+      panel.querySelector('#adhd-tier-motion').addEventListener('change', (e) => {
+        const v = parseInt(e.target.value, 10);
+        // Basura editada a mano no se persiste: el fallback del 1.4
+        // (clampTierMotionFloor) es el único juez de qué es un piso válido.
+        if (clampTierMotionFloor(v) !== v) {
+          e.target.value = String(clampTierMotionFloor(cfg.tierMotionFloor));
+          return;
+        }
+        setCfg('tierMotionFloor', v);
+      });
+
       // audio-cues: los dos toggles y el intervalo persisten via setCfg(); el
       // intervalo reinicia el scheduler para que el proximo vencimiento salga
       // del valor nuevo sin recargar la pagina.
@@ -3538,6 +3619,11 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
           setTimeout(() => playRewardFx(r), r * 1400 + 180);
         }
         setTimeout(() => { // escalón a la baja dentro del tramo: crossfade + flash
+          // El guard del click queda viejo a esta altura: 8,4 s de timers
+          // después, la navegación (watchPath) pudo haber destruido el overlay.
+          // Sin este re-chequeo, un click + navegación rápida revienta el
+          // callback con TypeError (lo expuso la ruta tier5 del e2e).
+          if (!overlay) return;
           const seg = overlay.querySelector('.adhd-seg.adhd-active') || overlay.querySelector('.adhd-seg');
           if (!seg || seg.querySelector('.adhd-rung-prev')) return;
           const s = document.createElement('span');
