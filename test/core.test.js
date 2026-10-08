@@ -1542,40 +1542,11 @@ describe('add-field-qa-loop: plantilla del guion de campo', () => {
 });
 
 describe('add-field-qa-loop: companion de QA + revert del in-script', () => {
-  const companionPath = path.join(__dirname, '..', 'qa', 'adhd-qa-helper.user.js');
   const src = publishedSource();
 
-  test('el companion existe, sin GM_* y sin red', () => {
-    const qa = fs.readFileSync(companionPath, 'utf8');
-    assert.equal(/@grant\s+none/.test(qa), true, 'debe declararse @grant none');
-    assert.equal(/GM_getValue|GM_setValue|GM_deleteValue|GM_xmlhttpRequest|GM_info/.test(qa), false,
-      'el companion no debe usar la API de manager: es un observador de página');
-    assert.equal(/fetch\(|XMLHttpRequest|navigator\.sendBeacon/.test(qa), false,
-      'el companion hace una peticion de red: la spec lo prohíbe');
-    assert.equal(/https?:\/\/(?!www\.w3\.org)/.test(qa.replace(/\/\/[^\n]*|\/\*[\s\S]*?\*\//g, '')), false,
-      'el código del companion referencia una URL externa');
-  });
-
-  test('el companion captura errores y expone su propio control adhd-qa-*', () => {
-    const qa = fs.readFileSync(companionPath, 'utf8');
-    assert.equal(/window\.addEventListener\('error'/.test(qa), true, 'no escucha errores de la página');
-    assert.equal(/window\.addEventListener\('unhandledrejection'/.test(qa), true, 'no escucha rechazos');
-    assert.equal(/addEventListener\('error'[\s\S]{0,220}qaRingPush\(/.test(qa), true,
-      'el hook de error no alimenta el ring buffer');
-    assert.equal(/addEventListener\('unhandledrejection'[\s\S]{0,260}qaRingPush\(/.test(qa), true,
-      'el hook de rechazo no alimenta el ring buffer');
-    for (const id of ['adhd-qa-btn', 'adhd-qa-panel', 'adhd-qa-copy', 'adhd-qa-status']) {
-      assert.equal(qa.includes(id), true, 'falta ' + id);
-    }
-    assert.equal(qa.includes('navigator.clipboard'), true, 'no usa el portapapeles');
-    assert.equal(/execCommand\('copy'\)/.test(qa), true, 'falta el fallback de copia');
-    assert.equal(qa.includes('motion: '), true, 'no reporta el motion efectivo');
-    assert.equal(qa.includes('overlay: '), true, 'no reporta el overlay');
-    assert.equal(/'presente'|'ausente'/.test(qa), true, 'no reporta presencia/ausencia de artefactos');
-    assert.equal(/version:/.test(qa.replace(/\/\/[^\n]*/g, '')), false,
-      'el companion no debe adivinar la version del script publicado');
-  });
-
+  // live-playwright-probe: el companion se elimino (lo reemplaza el probe con
+  // captura nativa de pageerror/console). Sus dos tests se fueron con el
+  // archivo. Queda este: el publicado sigue sin tooling de QA adentro.
   test('el userscript publicado quedó limpio del diagnóstico in-script', () => {
     for (const marker of ['adhd-diag', 'diagAddError', 'diagErrors', 'diagReset',
                           'buildDiagnosticBlock', 'secDiag', 'btnCopyDiag', 'hintDiag',

@@ -36,9 +36,17 @@ vault/
 *.singlefile.html
 Duolingo - Aprende*.html
 
+# Dumps del probe vivo (evidencia local regenerable: se pega al reporte, no se trackea)
+test/live/dump-*.txt
+qa/out/
+
 # Crapper (CRAP score): reporte y coverage son artefactos locales regenerables
 .metrics/
 target/
+
+# Deps de node (solo playwright dev, solo para test/live/; no se publican)
+node_modules/
+package-lock.json
 
 # Media + zips + logs (capturas/recordings de trabajo: NUNCA se publican solos.
 # Si un video va al README, se sube a release/ y se trackea a proposito.)

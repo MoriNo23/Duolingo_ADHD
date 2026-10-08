@@ -7,11 +7,15 @@
     "test": "npm run test:core",
     "test:core": "node --test test/core.test.js",
     "test:e2e": "node test/e2e/run.js",
+    "test:live": "node test/live/run-live.js",
     "test:vendor": "bash test/vendor-diff.sh",
     "mutate": "node mutation-test.js"
   },
   "engines": {
     "node": ">=18"
   },
-  "//": "Sin dependencias a proposito: los checks corren con node y un browser ya instalado. El E2E usa el Chrome/Chromium del sistema o la variable CHROME_BIN; falla ruidosamente si no hay ninguno, nunca en verde por omision. test:vendor diffea los tres modulos de terceros inline contra los zips de referencia del repo."
+  "//": "Sin dependencias a proposito SALVO playwright (solo dev, solo para el probe vivo test/live/): los checks corren con node y un browser ya instalado. El E2E usa el Chrome/Chromium del sistema o la variable CHROME_BIN; falla ruidosamente si no hay ninguno, nunca en verde por omision. test:live maneja el Chromium del sistema via executablePath (sin descargar browsers) y es local-only: necesita tu sesion real y nunca corre en CI. test:vendor diffea los tres modulos de terceros inline contra los zips de referencia del repo.",
+  "devDependencies": {
+    "playwright": "^1.64.0"
+  }
 }

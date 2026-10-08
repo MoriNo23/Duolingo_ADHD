@@ -90,21 +90,15 @@ function serve() {
 // lesson-bar-detection.
 function buildFixture(pathname) {
   const published = fs.readFileSync(PUBLISHED, 'utf8');
-  // add-field-qa-loop: el companion de QA se inyecta en su propio slot. Si
-  // todavía no existe, se inyecta vacío: el chequeo del companion da RED en
-  // vez de romper el armado del fixture.
-  const COMPANION = path.join(ROOT, 'qa', 'adhd-qa-helper.user.js');
-  const companion = fs.existsSync(COMPANION) ? fs.readFileSync(COMPANION, 'utf8') : '';
   // Reemplazo GLOBAL: __GOAL__ aparece mas de una vez en el fixture y
   // String.replace con patron de string solo cambia la primera (la segunda queda
   // como identificador y revienta con ReferenceError en el fixture).
   // Las funciones de reemplazo evitan que $& / $1 del contenido se interpreten.
   const script = fs.readFileSync(FIXTURE, 'utf8')
     .replace(/\/\*__SCRIPT__\*\//g, () => published)
-    .replace(/\/\*__QA_SCRIPT__\*\//g, () => companion)
     .replace(/__PATHNAME__/g, () => pathname)
     .replace(/__GOAL__/g, () => String(GOAL_SEC));
-  if (/__(GOAL|PATHNAME)__/.test(script) || script.includes('__SCRIPT__') || script.includes('__QA_SCRIPT__')) {
+  if (/__(GOAL|PATHNAME)__/.test(script) || script.includes('__SCRIPT__')) {
     throw new Error('el fixture quedo con un marcador sin reemplazar: revisa buildFixture()');
   }
   return script;
@@ -206,19 +200,6 @@ function checkReport(rep, results, { expectLesson, kind = 'none', navOnly = fals
     assert(results, 'al volver y quedarse idle: UN cue, sin ráfaga',
       ri.idleAfterReturn === 1, 'cues=' + ri.idleAfterReturn);
   }
-
-  // --- add-field-qa-loop: el companion de QA captura el diagnóstico de campo.
-  const qa = rep.qa || {};
-  assert(results, 'el companion de QA está instalado (botón adhd-qa)',
-    qa.present === true, 'present=' + qa.present);
-  assert(results, 'Copiar diagnóstico del companion suelta el bloque observable',
-    qa.copioAlgo === true && qa.tieneErrores === true && qa.tienePath === true
-      && qa.tieneMotion === true && qa.tieneArtefactos === true && qa.noAdivinaVersion === true,
-    'copio=' + qa.copioAlgo + ' errores=' + qa.tieneErrores + ' path=' + qa.tienePath
-      + ' motion=' + qa.tieneMotion + ' artefactos=' + qa.tieneArtefactos
-      + ' noVersion=' + qa.noAdivinaVersion);
-  assert(results, 'un error de runtime termina en el diagnóstico del companion',
-    qa.capturaElError === true, 'capturado=' + qa.capturaElError);
 
   if (expectLesson) {
     assert(results, 'la barra de leccion se detecta', rep.barFound === true);

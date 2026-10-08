@@ -182,13 +182,6 @@
 /*__SCRIPT__*/
 </script>
 
-<!-- add-field-qa-loop: el companion de QA, inyectado DESPUÉS del script
-     publicado. Si todavía no existe, el slot queda vacío y el chequeo del
-     companion reporta present=false (RED hasta que se cree). -->
-<script>
-/*__QA_SCRIPT__*/
-</script>
-
 <script>
 // ---- reporte: se escribe en el <pre> y el runner lo parsea del DOM volcado ----
 (function () {
@@ -592,47 +585,6 @@
   }
 
   // ---------------------------------------------------------------------
-  // add-field-qa-loop: el companion de QA captura el diagnóstico de campo.
-  // Se inyecta DESPUÉS del script publicado (slot propio del companion), su
-  // botón es propio (adhd-qa-*) y su bloque reporta lo observable: errores de
-  // la página, artefactos DOM del script y motion. La versión/config exacta del
-  // script NO se adivina (spec field-qa). El error sonda se filtra de
-  // __errors: es del arnés, no del script.
-  // ---------------------------------------------------------------------
-  function qaCompanionCheck() {
-    var out = { present: !!document.querySelector('#adhd-qa-btn') };
-    var btn = document.querySelector('#adhd-qa-copy');
-    if (out.present && btn) {
-      var capturado = null;
-      var clipReal = navigator.clipboard && navigator.clipboard.writeText;
-      try {
-        if (navigator.clipboard) {
-          navigator.clipboard.writeText = function (t) { capturado = t; return Promise.resolve(); };
-        }
-      } catch (e) { /* headless sin clipboard API: queda el fallback del companion */ }
-      btn.click();
-      out.copioAlgo = typeof capturado === 'string' && capturado.length > 0;
-      out.tieneErrores = /errores \(\d+\)/.test(capturado || '');
-      out.tienePath = (capturado || '').indexOf(location.pathname) !== -1;
-      out.tieneMotion = /motion: (calma|animado)/.test(capturado || '');
-      out.tieneArtefactos = /overlay: (presente|ausente)/.test(capturado || '')
-        && /riel: (presente|ausente)/.test(capturado || '');
-      out.noAdivinaVersion = !/version:/.test(capturado || '');
-      // Sonda: el ring buffer del companion debe ver el error de la página.
-      window.dispatchEvent(new ErrorEvent('error', {
-        message: 'qa-diag-inyectado', error: new Error('qa-diag-inyectado'),
-      }));
-      capturado = null;
-      btn.click();
-      out.capturaElError = (capturado || '').indexOf('qa-diag-inyectado') !== -1;
-      if (clipReal) { try { navigator.clipboard.writeText = clipReal; } catch (e) {} }
-      window.__errors = window.__errors.filter(function (m) {
-        return String(m).indexOf('qa-diag-inyectado') === -1;
-      });
-    }
-    report.qa = out;
-  }
-
   function staleFrameCheck() {
     var out = [];
     var names = [['racha', window.StreakFlames], ['diamante', window.CrystalReward], ['super', window.DuoReward]];
@@ -951,8 +903,6 @@
     // aunque no haya leccion) y siempre deja el panel cerrado para las fases
     // siguientes, que lo abren solas con gear.click().
     soundPanelCheck();
-    finish();
-    qaCompanionCheck();
     finish();
     if (!report.rail) return;                   // path que no es leccion
 

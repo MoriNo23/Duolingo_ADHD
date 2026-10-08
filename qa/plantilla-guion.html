@@ -35,8 +35,9 @@
   <h1>Guion de QA de campo</h1>
   <p>Probás en <strong>duolingo.com real</strong>, respondés acá, exportás el reporte y el agente lo lee.
      Los verdictos son <strong>OK</strong> (funcionó), <strong>FALLA</strong> (no funcionó) o <strong>Salto</strong>
-     (no aplica / no lo probaste). En evidencia va lo que copiaste con
-     <em>Diagnóstico → Copiar diagnóstico</em> del panel del script (o lo que sirva: pasos, qué viste).</p>
+     (no aplica / no lo probaste). En evidencia va el dump del probe vivo
+     (<em>qa/out/dump-live.json</em>, generado con <em>npm run test:live</em>)
+     o lo que sirva: pasos, qué viste.</p>
 </header>
 
 <section id="guion-meta-sec">
@@ -63,7 +64,7 @@
       <label><input type="radio" name="q-ejemplo-1" value="FALLA"> FALLA</label>
       <label><input type="radio" name="q-ejemplo-1" value="SALTO"> Salto</label>
       <textarea class="guion-nota" placeholder="Qué pasó"></textarea>
-      <textarea class="guion-evidencia" placeholder="Diagnóstico copiado del panel (evidencia)"></textarea>
+      <textarea class="guion-evidencia" placeholder="Dump del probe (qa/out/dump-live.json) o pasos"></textarea>
     </li>
     <li class="guion-q" data-q="ejemplo-2">
       <p class="guion-pregunta">(Ejemplo, reemplazar) El panel sigue abriendo y cerrando igual</p>
@@ -71,7 +72,7 @@
       <label><input type="radio" name="q-ejemplo-2" value="FALLA"> FALLA</label>
       <label><input type="radio" name="q-ejemplo-2" value="SALTO"> Salto</label>
       <textarea class="guion-nota" placeholder="Qué pasó"></textarea>
-      <textarea class="guion-evidencia" placeholder="Diagnóstico copiado del panel (evidencia)"></textarea>
+      <textarea class="guion-evidencia" placeholder="Dump del probe (qa/out/dump-live.json) o pasos"></textarea>
     </li>
   </ol>
 </section>
@@ -87,7 +88,7 @@
       <label><input type="radio" name="q-smoke-boot" value="FALLA"> FALLA</label>
       <label><input type="radio" name="q-smoke-boot" value="SALTO"> Salto</label>
       <textarea class="guion-nota" placeholder="Qué pasó"></textarea>
-      <textarea class="guion-evidencia" placeholder="Evidencia (diagnóstico, pasos)"></textarea>
+      <textarea class="guion-evidencia" placeholder="Dump del probe (qa/out/dump-live.json) o pasos"></textarea>
     </li>
     <li class="guion-q" data-q="smoke-barra">
       <p class="guion-pregunta">S2. La barra de lección se detecta en /learn (aparecen segmentos)</p>
@@ -95,7 +96,7 @@
       <label><input type="radio" name="q-smoke-barra" value="FALLA"> FALLA</label>
       <label><input type="radio" name="q-smoke-barra" value="SALTO"> Salto</label>
       <textarea class="guion-nota" placeholder="Qué pasó"></textarea>
-      <textarea class="guion-evidencia" placeholder="Evidencia (diagnóstico, pasos)"></textarea>
+      <textarea class="guion-evidencia" placeholder="Dump del probe (qa/out/dump-live.json) o pasos"></textarea>
     </li>
     <li class="guion-q" data-q="smoke-riel">
       <p class="guion-pregunta">S3. Riel, cronómetro y overlay se ven bien sobre la barra real</p>
@@ -103,7 +104,7 @@
       <label><input type="radio" name="q-smoke-riel" value="FALLA"> FALLA</label>
       <label><input type="radio" name="q-smoke-riel" value="SALTO"> Salto</label>
       <textarea class="guion-nota" placeholder="Qué pasó"></textarea>
-      <textarea class="guion-evidencia" placeholder="Evidencia (diagnóstico, pasos)"></textarea>
+      <textarea class="guion-evidencia" placeholder="Dump del probe (qa/out/dump-live.json) o pasos"></textarea>
     </li>
     <li class="guion-q" data-q="smoke-panel">
       <p class="guion-pregunta">S4. El panel de ajustes abre, cierra y sus controles responden</p>
@@ -111,7 +112,7 @@
       <label><input type="radio" name="q-smoke-panel" value="FALLA"> FALLA</label>
       <label><input type="radio" name="q-smoke-panel" value="SALTO"> Salto</label>
       <textarea class="guion-nota" placeholder="Qué pasó"></textarea>
-      <textarea class="guion-evidencia" placeholder="Evidencia (diagnóstico, pasos)"></textarea>
+      <textarea class="guion-evidencia" placeholder="Dump del probe (qa/out/dump-live.json) o pasos"></textarea>
     </li>
     <li class="guion-q" data-q="smoke-sonido">
       <p class="guion-pregunta">S5. Los sonidos: Probar sonido suena, y el recordatorio respeta el idle</p>
@@ -119,7 +120,7 @@
       <label><input type="radio" name="q-smoke-sonido" value="FALLA"> FALLA</label>
       <label><input type="radio" name="q-smoke-sonido" value="SALTO"> Salto</label>
       <textarea class="guion-nota" placeholder="Qué pasó"></textarea>
-      <textarea class="guion-evidencia" placeholder="Evidencia (diagnóstico, pasos)"></textarea>
+      <textarea class="guion-evidencia" placeholder="Dump del probe (qa/out/dump-live.json) o pasos"></textarea>
     </li>
     <li class="guion-q" data-q="smoke-motion">
       <p class="guion-pregunta">S6. El nivel de animación se respeta (never/system/always hace lo esperado)</p>
@@ -127,7 +128,7 @@
       <label><input type="radio" name="q-smoke-motion" value="FALLA"> FALLA</label>
       <label><input type="radio" name="q-smoke-motion" value="SALTO"> Salto</label>
       <textarea class="guion-nota" placeholder="Qué pasó"></textarea>
-      <textarea class="guion-evidencia" placeholder="Evidencia (diagnóstico, pasos)"></textarea>
+      <textarea class="guion-evidencia" placeholder="Dump del probe (qa/out/dump-live.json) o pasos"></textarea>
     </li>
     <li class="guion-q" data-q="smoke-recordatorio">
       <p class="guion-pregunta">S7. El recordatorio no suena mientras practicás; suena tras 45 s quieto</p>
@@ -135,7 +136,7 @@
       <label><input type="radio" name="q-smoke-recordatorio" value="FALLA"> FALLA</label>
       <label><input type="radio" name="q-smoke-recordatorio" value="SALTO"> Salto</label>
       <textarea class="guion-nota" placeholder="Qué pasó"></textarea>
-      <textarea class="guion-evidencia" placeholder="Evidencia (diagnóstico, pasos)"></textarea>
+      <textarea class="guion-evidencia" placeholder="Dump del probe (qa/out/dump-live.json) o pasos"></textarea>
     </li>
     <li class="guion-q" data-q="smoke-journal">
       <p class="guion-pregunta">S8. El diario (si lo tenés activo) cuenta lecciones y tramos</p>
@@ -143,7 +144,7 @@
       <label><input type="radio" name="q-smoke-journal" value="FALLA"> FALLA</label>
       <label><input type="radio" name="q-smoke-journal" value="SALTO"> Salto</label>
       <textarea class="guion-nota" placeholder="Qué pasó"></textarea>
-      <textarea class="guion-evidencia" placeholder="Evidencia (diagnóstico, pasos)"></textarea>
+      <textarea class="guion-evidencia" placeholder="Dump del probe (qa/out/dump-live.json) o pasos"></textarea>
     </li>
   </ol>
 </section>
