@@ -1425,20 +1425,36 @@ describe('remind-only-when-idle: el recordatorio solo suena en idle', () => {
     const i = src.indexOf('function reminderTick()');
     assert.ok(i > -1, 'falta reminderTick()');
     const cuerpo = src.slice(i, src.indexOf("document.addEventListener('visibilitychange'", i));
-    // El gate de idle vive en el núcleo puro y el tick lo consulta.
-    assert.equal(/canPlayReminder\(\{ now, lastInteractionAt, hidden: document\.hidden \}\)/.test(cuerpo), true,
-      'el tick no consulta el gate de idle');
+    // reminder-desktop-notification: el gate de idle vive en el núcleo puro
+    // (reminderAction) y el tick DELEGA en él con el estado real. Se pinea la
+    // delegación y el estado que viaja, no el formato literal de la llamada.
+    assert.equal(/reminderAction\(\{/.test(cuerpo), true,
+      'el tick no consulta la decisión pura (reminderAction)');
+    assert.equal(/hidden: document\.hidden/.test(cuerpo), true,
+      'el tick no pasa el estado de visibilidad a la decisión');
+    assert.equal(/lastInteractionAt,/.test(cuerpo), true,
+      'el tick no pasa la última interacción a la decisión');
     assert.equal(/reminderPending = true/.test(cuerpo), true, 'no queda pendiente cuando toca enfocado');
     // Pendiente ≠ vencido de nuevo: el branch que no suena NO reagenda.
     const pendiente = cuerpo.slice(cuerpo.indexOf('reminderPending = true'),
       cuerpo.indexOf('reminderPending = true') + 80);
     assert.equal(/reminderNextAt\s*=/.test(pendiente), false,
       'el branch pendiente reagenda: acumularía deuda');
-    // El único reagenda del tick nace del momento en que SONÓ.
-    assert.equal((cuerpo.match(/reminderNextAt =/g) || []).length, 1,
-      'el tick reagenda más de una vez');
-    assert.ok(cuerpo.indexOf("playCue('reminder')") < cuerpo.indexOf('reminderNextAt ='),
-      'el próximo intervalo no nace del momento del play');
+    // reminder-desktop-notification: con DOS canales hay DOS reagenda — uno
+    // por entrega real. El audible nace del cue; el oculto, de una notificación
+    // que SÍ se entregó ('sent'). Ninguno nace de un intento fallido, y el
+    // branch pendiente (arriba) sigue sin reagenda: nunca ráfaga.
+    const reagenda = (cuerpo.match(/reminderNextAt =/g) || []).length;
+    assert.equal(reagenda, 2, 'el tick reagenda más veces que canales entrega');
+    const ramaNotify = cuerpo.slice(cuerpo.indexOf("action === 'notify'"), cuerpo.indexOf('pendingReturnAt'));
+    assert.equal((ramaNotify.match(/reminderNextAt =/g) || []).length, 1,
+      'la rama notify reagenda más de una vez');
+    assert.ok(ramaNotify.indexOf("r === 'sent'") < ramaNotify.indexOf('reminderNextAt ='),
+      'el reagenda del canal oculto no nace de una entrega confirmada');
+    // El reagenda audible nace del momento en que SONÓ (último cue → último
+    // reagenda: el camino audible es el final del tick).
+    assert.ok(cuerpo.lastIndexOf("playCue('reminder')") < cuerpo.lastIndexOf('reminderNextAt ='),
+      'el próximo intervalo audible no nace del momento del play');
   });
 
   test('al volver de una pestaña oculta: gracia de 5 s y reset solo si nada pendía', () => {
@@ -1471,6 +1487,309 @@ describe('remind-only-when-idle: el recordatorio solo suena en idle', () => {
   });
 });
 
+describe('reminder-desktop-notification: la decisión vence-ahora-¿qué-hago? (reminderAction)', () => {
+  const IDLE = C.REMINDER_IDLE_MS;
+  // Un recordatorio vencido justito (now == nextAt), visible, con el idle
+  // exacto: el caso canónico del camino audible.
+  const due = (over) => ({
+    now: 1000000 + (over || 0), nextAt: 1000000,
+    hidden: false, lastInteractionAt: 1000000 - IDLE, notifEnabled: false,
+  });
+
+  test('visible + idle → play: el camino audible de siempre', () => {
+    assert.equal(C.reminderAction(due()), 'play');
+  });
+
+  test('visible + enfocado → pending: la deuda es una y no se pierde', () => {
+    const s = due();
+    s.lastInteractionAt = s.now - 1000;   // interactuó hace 1 s
+    assert.equal(C.reminderAction(s), 'pending');
+  });
+
+  test('oculto + notificación activada → notify: escala al canal de escritorio', () => {
+    const s = due();
+    s.hidden = true; s.notifEnabled = true;
+    assert.equal(C.reminderAction(s), 'notify');
+  });
+
+  test('oculto + notificación desactivada → pending: el comportamiento anterior, exacto', () => {
+    const s = due();
+    s.hidden = true; s.notifEnabled = false;
+    assert.equal(C.reminderAction(s), 'pending');
+  });
+
+  test('oculto 30 min (más allá del umbral de throttling de 5 min) → notify igual', () => {
+    // El throttling de Chrome cae a 1 wake/min a los 5 min oculto: para la
+    // página "oculto un rato" y "oculto media hora" llegan igual al tick. La
+    // decisión no puede depender de cuánto hace que no se ve la pestaña —
+    // este es el caso que documenta por qué existe la rama (tasks 1.2).
+    const s = due();
+    s.hidden = true; s.notifEnabled = true;
+    s.now = s.nextAt + 30 * 60 * 1000;
+    assert.equal(C.reminderAction(s), 'notify');
+  });
+
+  test('antes del vencimiento → none, aunque todo lo demás invite a sonar', () => {
+    const s = due(-1);   // ahora = vencimiento - 1 ms
+    assert.equal(C.reminderAction(s), 'none');
+    s.hidden = true; s.notifEnabled = true;
+    assert.equal(C.reminderAction(s), 'none');
+  });
+
+  test('basura y NaN → none: la decisión nunca inventa trabajo', () => {
+    assert.equal(C.reminderAction(null), 'none');
+    assert.equal(C.reminderAction(undefined), 'none');
+    assert.equal(C.reminderAction({}), 'none');
+    assert.equal(C.reminderAction({ now: NaN, nextAt: 0, hidden: false, lastInteractionAt: 0, notifEnabled: true }), 'none');
+    assert.equal(C.reminderAction({ now: 5, nextAt: NaN, hidden: true, lastInteractionAt: 0, notifEnabled: true }), 'none');
+    assert.equal(C.reminderAction({ now: 5, nextAt: 0, hidden: false, lastInteractionAt: NaN, notifEnabled: true }), 'none');
+  });
+
+  test('notifEnabled basura → pending: sin elección explícita, el silencio de antes', () => {
+    const s = due();
+    s.hidden = true; s.notifEnabled = 'garbage';
+    assert.equal(C.reminderAction(s), 'pending');
+  });
+
+  test('el umbral de idle es inclusivo, igual que canPlayReminder', () => {
+    const s = due();
+    s.lastInteractionAt = s.now - IDLE;
+    assert.equal(C.reminderAction(s), 'play');
+    s.lastInteractionAt = s.now - IDLE + 1;
+    assert.equal(C.reminderAction(s), 'pending');
+  });
+});
+
+describe('reminder-desktop-notification: el canal de escritorio (GM_notification)', () => {
+  // Crudo, CON metadata: el @grant vive en el bloque ==UserScript==.
+  const raw = fs.readFileSync(publishedPath(), 'utf8');
+  const body = publishedSource();
+
+  test('el @grant de GM_notification está declarado en la metadata', () => {
+    assert.equal(/^\/\/ @grant\s+GM_notification$/m.test(raw), true,
+      'falta el @grant: sin él el manager no expone GM_notification y el canal muere en silencio');
+  });
+
+  test('jamás se toca la Notification del sitio: ni permiso ni constructor', () => {
+    assert.equal(/Notification\.requestPermission/.test(body), false,
+      'pedir permiso lo atribuiría a duolingo.com (spec: la notificación sale del manager)');
+    assert.equal(/new Notification\s*\(/.test(body), false,
+      'la notificación no puede salir de la página: le daría al sitio un permiso que nunca pidió');
+  });
+
+  test('feature-detect antes de llamar: un @grant declarado no garantiza la función', () => {
+    const i = body.indexOf('function notifyReminder(');
+    assert.ok(i > -1, 'falta notifyReminder()');
+    const cuerpo = body.slice(i, i + 400);
+    assert.equal(/typeof GM_notification !== 'function'/.test(cuerpo), true,
+      'sin feature-detect el recordatorio revienta en Violentmonkey/Greasemonkey/Safari');
+  });
+
+  test('fallback: GM_notification ausente → unsupported, sin lanzar', () => {
+    const had = globalThis.GM_notification;
+    delete globalThis.GM_notification;
+    try {
+      assert.equal(C.notifyReminder('t', 'b'), 'unsupported');
+    } finally { if (had !== undefined) globalThis.GM_notification = had; }
+  });
+
+  test('fallback: la decisión no depende de la API — oculto+notif sigue siendo notify', () => {
+    const had = globalThis.GM_notification;
+    delete globalThis.GM_notification;
+    try {
+      const s = { now: 100, nextAt: 0, hidden: true, lastInteractionAt: 0, notifEnabled: true };
+      assert.equal(C.reminderAction(s), 'notify');
+    } finally { if (had !== undefined) globalThis.GM_notification = had; }
+  });
+
+  test('GM_notification que revienta → blocked: el intento no se entrega, sin lanzar', () => {
+    globalThis.GM_notification = () => { throw new Error('daemon caído'); };
+    try {
+      assert.equal(C.notifyReminder('t', 'b'), 'blocked');
+    } finally { delete globalThis.GM_notification; }
+  });
+
+  test('GM_notification viva → sent, con silent: el sonido lo pone el script', () => {
+    let seen = null;
+    globalThis.GM_notification = (d) => { seen = d; };
+    try {
+      assert.equal(C.notifyReminder('Título', 'Cuerpo'), 'sent');
+      assert.equal(seen && seen.silent, true, 'la notificación no debe sonar por sí sola');
+      assert.equal(seen && seen.title, 'Título');
+      assert.equal(seen && seen.text, 'Cuerpo');
+    } finally { delete globalThis.GM_notification; }
+  });
+});
+
+describe('reminder-desktop-notification: el panel falla visible', () => {
+  const src = publishedSource();
+
+  test('la sección de sonido tiene el toggle de notificación con id estable, persistido', () => {
+    assert.equal(/id="adhd-reminder-notif"/.test(src), true,
+      'falta el control de notificación con id estable');
+    const i = src.indexOf("querySelector('#adhd-reminder-notif')");
+    assert.ok(i > -1, 'falta el listener del toggle de notificación');
+    const cuerpo = src.slice(i, i + 220);
+    assert.equal(/setCfg\('reminderNotifEnabled', e\.target\.checked\)/.test(cuerpo), true,
+      'el toggle de notificación no persiste');
+  });
+
+  test('valor desconocido del toggle cae al default, no queda indefinido', () => {
+    const i = src.indexOf('adhd_config');
+    const carga = src.slice(i, i + 700);
+    assert.equal(/typeof cfg\.reminderNotifEnabled !== 'boolean'/.test(carga), true,
+      'la carga no normaliza un reminderNotifEnabled corrupto/editado a mano');
+    assert.equal(/cfg\.reminderNotifEnabled = DEFAULTS\.reminderNotifEnabled/.test(carga), true,
+      'el fallback no cae al default');
+  });
+
+  test('los mensajes de estado existen en las dos variantes (EN/ES)', () => {
+    assert.ok(C.I18N.es.notifBlocked, 'falta el mensaje de bloqueado (ES)');
+    assert.ok(C.I18N.en.notifBlocked, 'falta el mensaje de bloqueado (EN)');
+    assert.ok(C.I18N.es.notifUnsupported, 'falta el mensaje de manager sin API (ES)');
+    assert.ok(C.I18N.en.notifUnsupported, 'falta el mensaje de manager sin API (EN)');
+    assert.ok(C.I18N.es.lblReminderNotif && C.I18N.en.lblReminderNotif, 'falta la etiqueta del toggle');
+  });
+
+  test('el intento no entregado se escribe en el panel (y se limpia al entregar)', () => {
+    const i = src.indexOf('function renderNotifStatus');
+    assert.ok(i > -1, 'falta renderNotifStatus()');
+    const cuerpo = src.slice(i, i + 700);
+    assert.equal(/adhd-reminder-notif-status/.test(cuerpo), true,
+      'el estado no se escribe en el elemento del panel');
+    assert.equal(/notifBlocked/.test(cuerpo), true, 'no muestra el mensaje de bloqueado');
+    assert.equal(/notifUnsupported/.test(cuerpo), true, 'no distingue el manager sin API');
+    const tick = src.slice(src.indexOf('function reminderTick()'),
+      src.indexOf("document.addEventListener('visibilitychange'"));
+    assert.equal(/renderNotifStatus\(\)/.test(tick), true,
+      'el tick no actualiza el estado del panel tras un intento');
+    const seccion = src.slice(src.indexOf('// ===== Sección SONIDO'), src.indexOf('// ===== Sección DIARIO'));
+    assert.equal(/id="adhd-reminder-notif-status"/.test(seccion), true,
+      'la sección de sonido no tiene el elemento de estado');
+    const build = src.indexOf('panel.innerHTML = html');
+    assert.ok(build > -1 && src.indexOf('renderNotifStatus()', build) > build,
+      'el panel no pinta el estado actual al abrirse');
+  });
+});
+
+describe('tier-motion-per-seg: el eje por peldaño (tierMotionFor)', () => {
+  const src = publishedSource();
+  const RUNGS = [0, 1, 2, 3, 4, 5];
+  const FLOORS = [3, 4, 5, 6];
+
+  test('calma gobernando (never, o system con reduce): TODO peldaño resuelve reduced, sin excepción, incluido Super', () => {
+    // El requirement de accesibilidad. La decisión de motion existente ya
+    // resolvió calma: el eje por peldaño no puede elegir MÁS movimiento que
+    // eso — ningún valor del piso re-anima nada.
+    for (const level of ['never', 'system']) {
+      const reduce = level === 'system';   // never calma siempre; system calma si el sistema pide
+      for (const rung of RUNGS) {
+        for (const floor of FLOORS) {
+          assert.equal(C.tierMotionFor({ level, reduce, rung, floor }), 'reduced',
+            `level=${level} reduce=${reduce} rung=${rung} piso=${floor}`);
+        }
+      }
+    }
+  });
+
+  test('motion permitido (always, o system sin reduce): los bajos nunca ganan canvas; los altos animan desde el piso', () => {
+    const permitidos = [
+      { level: 'always', reduce: false },
+      { level: 'always', reduce: true },   // 'always' ignora el reduce: contrato existente
+      { level: 'system', reduce: false },
+    ];
+    for (const { level, reduce } of permitidos) {
+      for (const rung of [0, 1, 2]) {
+        for (const floor of FLOORS) {
+          assert.equal(C.tierMotionFor({ level, reduce, rung, floor }), 'off',
+            `bajo: level=${level} reduce=${reduce} rung=${rung} piso=${floor}`);
+        }
+      }
+      for (const rung of [3, 4, 5]) {
+        for (const floor of FLOORS) {
+          assert.equal(C.tierMotionFor({ level, reduce, rung, floor }),
+            rung >= floor ? 'animated' : 'off',
+            `alto: level=${level} reduce=${reduce} rung=${rung} piso=${floor}`);
+        }
+      }
+    }
+  });
+
+  test('ni el piso más bajo re-anima a Super bajo calma del sistema', () => {
+    assert.equal(C.tierMotionFor({ level: 'system', reduce: true, rung: 5, floor: 3 }), 'reduced');
+    assert.equal(C.tierMotionFor({ level: 'never', reduce: false, rung: 5, floor: 3 }), 'reduced');
+  });
+
+  test('la precedencia es estructural: el eje no aparece en el camino que ya resolvió calma', () => {
+    // Un assert sobre el ORDEN de las decisiones, no solo del resultado: es lo
+    // que impide un futuro "dejamos que el usuario lo fuerce" que rompería la
+    // accesibilidad en silencio (tasks 1.2).
+    const i = src.indexOf('function tierMotionFor(');
+    assert.ok(i > -1, 'falta tierMotionFor()');
+    const cuerpo = src.slice(i, i + 600);
+    const reducedAt = cuerpo.indexOf("return 'reduced'");
+    const ejeAt = cuerpo.indexOf('floor');
+    assert.ok(reducedAt > -1, 'no hay camino de calma en tierMotionFor');
+    assert.ok(ejeAt > -1, 'no se menciona el piso en tierMotionFor');
+    assert.ok(reducedAt < ejeAt,
+      'el eje por peldaño aparece ANTES del return de calma: la precedencia quedó al revés');
+  });
+
+  test('valor desconocido del piso cae al default enviado (3): config vieja, editada a mano o corrupta', () => {
+    // El contrato de la spec reward-fx: "an unrecognised stored value SHALL
+    // fall back to the shipped default rather than leaving the effects in an
+    // undefined state". El default es el comportamiento de siempre: los tres
+    // peldaños altos animan.
+    const basura = [undefined, null, 'garbage', NaN, 99, 3.5, -1, {}];
+    for (const floor of basura) {
+      for (const rung of [3, 4, 5]) {
+        assert.equal(C.tierMotionFor({ level: 'always', reduce: false, rung, floor }), 'animated',
+          `piso=${String(floor)} rung=${rung}: basura debe caer al default (3), no a estado indefinido`);
+      }
+    }
+    // Y el default no es "todo apagado": la basura no puede dejar los efectos
+    // sin canvas (seguirían "funcionando", no mudos).
+    assert.equal(C.tierMotionFor({ level: 'always', reduce: false, rung: 3, floor: undefined }), 'animated');
+  });
+});
+
+describe('tier-motion-per-seg: el control del panel', () => {
+  const src = publishedSource();
+
+  test('el select del eje existe con id estable, persiste via setCfg y usa el fallback del 1.4', () => {
+    assert.equal(/id="adhd-tier-motion"/.test(src), true,
+      'falta el select del eje con id estable');
+    const i = src.indexOf("querySelector('#adhd-tier-motion')");
+    assert.ok(i > -1, 'falta el listener del select del eje');
+    const cuerpo = src.slice(i, i + 500);
+    assert.equal(/setCfg\('tierMotionFloor',/.test(cuerpo), true,
+      'el select no persiste el piso');
+    assert.equal(/clampTierMotionFloor/.test(cuerpo), true,
+      'el listener no valida contra el fallback del 1.4: basura editada a mano se persistiría');
+  });
+
+  test('las etiquetas del eje existen en las dos variantes (EN/ES)', () => {
+    for (const lang of ['es', 'en']) {
+      assert.ok(C.I18N[lang].lblTierMotion, `falta lblTierMotion (${lang})`);
+      assert.ok(C.I18N[lang].hintTierMotion, `falta hintTierMotion (${lang})`);
+      for (const k of ['tierMotionRacha', 'tierMotionDiamante', 'tierMotionSuper', 'tierMotionNone']) {
+        assert.ok(C.I18N[lang][k], `falta ${k} (${lang})`);
+      }
+    }
+  });
+
+  test('el select muestra las cuatro opciones y marca la actual desde cfg', () => {
+    const i = src.indexOf('id="adhd-tier-motion"');
+    assert.ok(i > -1, 'falta el select en el markup');
+    const cuerpo = src.slice(i, i + 800);
+    for (const v of ['value="3"', 'value="4"', 'value="5"', 'value="6"']) {
+      assert.equal(cuerpo.includes(v), true, `falta la opción ${v} del eje`);
+    }
+    assert.equal(/cfg\.tierMotionFloor === 3 \? ' selected' : ''/.test(cuerpo), true,
+      'el select no marca la opción actual desde cfg.tierMotionFloor');
+  });
+});
+
 describe('add-field-qa-loop: plantilla del guion de campo', () => {
   const plantillaPath = path.join(__dirname, '..', 'qa', 'plantilla-guion.html');
 
@@ -1497,10 +1816,11 @@ describe('add-field-qa-loop: plantilla del guion de campo', () => {
     assert.equal(/url\(https?:/.test(html), false, 'importa CSS externo');
   });
 
-  test('el smoke fijo viene pre-impreso con sus 8 items', () => {
+  test('el smoke fijo viene pre-impreso con sus 9 items', () => {
     const html = plantillaSrc();
     for (const id of ['smoke-boot', 'smoke-barra', 'smoke-riel', 'smoke-panel',
-                      'smoke-sonido', 'smoke-motion', 'smoke-recordatorio', 'smoke-journal']) {
+                      'smoke-sonido', 'smoke-motion', 'smoke-recordatorio', 'smoke-journal',
+                      'smoke-notif']) {
       assert.equal(html.includes('data-q="' + id + '"'), true, 'falta el smoke ' + id);
     }
   });
@@ -1542,40 +1862,11 @@ describe('add-field-qa-loop: plantilla del guion de campo', () => {
 });
 
 describe('add-field-qa-loop: companion de QA + revert del in-script', () => {
-  const companionPath = path.join(__dirname, '..', 'qa', 'adhd-qa-helper.user.js');
   const src = publishedSource();
 
-  test('el companion existe, sin GM_* y sin red', () => {
-    const qa = fs.readFileSync(companionPath, 'utf8');
-    assert.equal(/@grant\s+none/.test(qa), true, 'debe declararse @grant none');
-    assert.equal(/GM_getValue|GM_setValue|GM_deleteValue|GM_xmlhttpRequest|GM_info/.test(qa), false,
-      'el companion no debe usar la API de manager: es un observador de página');
-    assert.equal(/fetch\(|XMLHttpRequest|navigator\.sendBeacon/.test(qa), false,
-      'el companion hace una peticion de red: la spec lo prohíbe');
-    assert.equal(/https?:\/\/(?!www\.w3\.org)/.test(qa.replace(/\/\/[^\n]*|\/\*[\s\S]*?\*\//g, '')), false,
-      'el código del companion referencia una URL externa');
-  });
-
-  test('el companion captura errores y expone su propio control adhd-qa-*', () => {
-    const qa = fs.readFileSync(companionPath, 'utf8');
-    assert.equal(/window\.addEventListener\('error'/.test(qa), true, 'no escucha errores de la página');
-    assert.equal(/window\.addEventListener\('unhandledrejection'/.test(qa), true, 'no escucha rechazos');
-    assert.equal(/addEventListener\('error'[\s\S]{0,220}qaRingPush\(/.test(qa), true,
-      'el hook de error no alimenta el ring buffer');
-    assert.equal(/addEventListener\('unhandledrejection'[\s\S]{0,260}qaRingPush\(/.test(qa), true,
-      'el hook de rechazo no alimenta el ring buffer');
-    for (const id of ['adhd-qa-btn', 'adhd-qa-panel', 'adhd-qa-copy', 'adhd-qa-status']) {
-      assert.equal(qa.includes(id), true, 'falta ' + id);
-    }
-    assert.equal(qa.includes('navigator.clipboard'), true, 'no usa el portapapeles');
-    assert.equal(/execCommand\('copy'\)/.test(qa), true, 'falta el fallback de copia');
-    assert.equal(qa.includes('motion: '), true, 'no reporta el motion efectivo');
-    assert.equal(qa.includes('overlay: '), true, 'no reporta el overlay');
-    assert.equal(/'presente'|'ausente'/.test(qa), true, 'no reporta presencia/ausencia de artefactos');
-    assert.equal(/version:/.test(qa.replace(/\/\/[^\n]*/g, '')), false,
-      'el companion no debe adivinar la version del script publicado');
-  });
-
+  // live-playwright-probe: el companion se elimino (lo reemplaza el probe con
+  // captura nativa de pageerror/console). Sus dos tests se fueron con el
+  // archivo. Queda este: el publicado sigue sin tooling de QA adentro.
   test('el userscript publicado quedó limpio del diagnóstico in-script', () => {
     for (const marker of ['adhd-diag', 'diagAddError', 'diagErrors', 'diagReset',
                           'buildDiagnosticBlock', 'secDiag', 'btnCopyDiag', 'hintDiag',
@@ -1673,5 +1964,69 @@ describe('fix-crono-contrast: el tick y el CSS del contador', () => {
       '.urgent sigue translúcido (color sobre color)');
     assert.equal(/\.adhd-mini-crono \{[^}]*transition:[^;}]*background/.test(base), true,
       'la transición no cubre el fondo: el cambio de peldaño sería un salto');
+  });
+});
+
+describe('calm-canvas-grayscale: rampa de grises por peldaño con efecto', () => {
+  const src = publishedSource();
+
+  // WCAG propia del test, independiente de la implementación (mismo patrón
+  // que la suite de fix-crono-contrast): el floor es una medición, no una
+  // constante copiada del código.
+  function lumHex(h) {
+    const v = [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16) / 255)
+      .map((c) => (c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4)));
+    return 0.2126 * v[0] + 0.7152 * v[1] + 0.0722 * v[2];
+  }
+  function ratio(a, b) {
+    const x = lumHex(a), y = lumHex(b);
+    return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05);
+  }
+  function esGris(h) {
+    const m = /^#([0-9a-fA-F]{2})([0-9a-fA-F]{2})([0-9a-fA-F]{2})$/.exec(h);
+    return !!m && m[1].toLowerCase() === m[2].toLowerCase() && m[2].toLowerCase() === m[3].toLowerCase();
+  }
+
+  test('los tres peldaños con efecto resuelven un gris cada uno', () => {
+    assert.equal(typeof C.calmGreyFor, 'function', 'falta calmGreyFor en el núcleo');
+    for (const rung of [3, 4, 5]) {
+      const g = C.calmGreyFor(rung);
+      assert.equal(esGris(g), true, `peldaño ${rung} no resuelve un gris neutro: ${g}`);
+    }
+  });
+
+  test('los dos pares consecutivos miden ≥1.5:1 (lo que el gris ingenuo falla)', () => {
+    const [r3, r4, r5] = [C.calmGreyFor(3), C.calmGreyFor(4), C.calmGreyFor(5)];
+    assert.ok(ratio(r3, r4) >= 1.5, `racha↔diamante ${ratio(r3, r4).toFixed(2)}:1 < 1.5:1`);
+    assert.ok(ratio(r4, r5) >= 1.5, `diamante↔super ${ratio(r4, r5).toFixed(2)}:1 < 1.5:1`);
+  });
+
+  test('el ramp no inventa grises para peldaños sin efecto ni lanza con basura', () => {
+    assert.equal(C.calmGreyFor(0), null, 'madera no tiene efecto canvas: debe ser null');
+    assert.equal(C.calmGreyFor(2), null, 'plata no tiene efecto canvas: debe ser null');
+    assert.equal(C.calmGreyFor(99), null, 'peldaño inexistente: debe ser null');
+    assert.equal(C.calmGreyFor('super'), null, 'la clave es el indice, no el id');
+  });
+
+  test('alcance pineado: el ramp vive solo en los tres efectos, nunca en el cronómetro', () => {
+    // Definición + export + 3 usos (uno por efecto). Cualquier otro uso
+    // (cronómetro, riel, segmentos) rompe este conteo a propósito: es la
+    // defensa del fix-crono-contrast contra grisar la capa informativa.
+    const n = (src.match(/calmGreyFor/g) || []).length;
+    assert.equal(n, 5, `calmGreyFor aparece ${n} veces, deben ser 5 (def + export + 3 efectos)`);
+    const tick = src.slice(src.indexOf('function startMiniCrono'), src.indexOf('function stopMiniCrono'));
+    assert.ok(tick.length > 1000, 'no se encontró la región del tick del cronómetro');
+    assert.equal(/calmGreyFor/.test(tick), false, 'el cronómetro referencia el ramp: prohibido por spec');
+  });
+
+  test('shadeGrey escala un gris sin sacarlo del eje neutro', () => {
+    assert.equal(typeof C.shadeGrey, 'function', 'falta shadeGrey en el núcleo');
+    assert.equal(C.shadeGrey('#808080', 1), '#808080', 'factor 1 es identidad');
+    const oscuro = C.shadeGrey('#808080', 0.5);
+    assert.equal(oscuro, '#404040', 'factor 0.5 parte al medio: ' + oscuro);
+    assert.equal(C.shadeGrey('#808080', 2), '#ffffff', 'clampa arriba, no se pasa de ff');
+    assert.equal(C.shadeGrey('#808080', 0), '#000000', 'factor 0 es negro');
+    assert.equal(C.shadeGrey('basura', 1), null, 'basura no lanza: null');
+    assert.equal(C.shadeGrey('#808080', NaN), null, 'factor NaN no lanza: null');
   });
 });
