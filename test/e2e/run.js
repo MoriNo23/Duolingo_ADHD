@@ -155,11 +155,13 @@ function checkReport(rep, results, { expectLesson, kind = 'none', navOnly = fals
   // Corre en TODAS las rutas (con y sin barra de leccion) porque el recordatorio
   // y los controles no dependen de la leccion.
   const snd = rep.sound || {};
-  assert(results, 'la seccion SONIDO del panel tiene sus 4 controles',
+  assert(results, 'la seccion SONIDO del panel tiene sus 5 controles (incluido el de notificación)',
     snd.present === true, JSON.stringify(snd).slice(0, 400));
   assert(results, 'los dos sonidos arrancan encendidos (defaults)',
     snd.cuesChecked === true && snd.reminderChecked === true,
     'soundCues=' + snd.cuesChecked + ' reminder=' + snd.reminderChecked);
+  assert(results, 'la notificación de escritorio arranca encendida (default)',
+    snd.notifChecked === true, 'notif=' + snd.notifChecked);
   assert(results, 'el intervalo arranca en 60s y dentro del rango soportado',
     snd.range === '60' && snd.rangeMin === '15' && snd.rangeMax === '900',
     'range=' + snd.range + ' [' + snd.rangeMin + '..' + snd.rangeMax + ']');
@@ -174,6 +176,9 @@ function checkReport(rep, results, { expectLesson, kind = 'none', navOnly = fals
   assert(results, 'el toggle del recordatorio persiste en los dos sentidos',
     snd.storedReminderOff === false && snd.storedReminderOn === true,
     'off=' + snd.storedReminderOff + ' on=' + snd.storedReminderOn);
+  assert(results, 'el toggle de notificación de escritorio persiste en los dos sentidos',
+    snd.storedNotifOff === false && snd.storedNotifOn === true,
+    'off=' + snd.storedNotifOff + ' on=' + snd.storedNotifOn);
   assert(results, 'el boton de prueba de sonido no rompe nada',
     snd.testBtnErrors === 0, 'errores=' + snd.testBtnErrors);
   assert(results, 'el panel queda cerrado para el resto de la corrida',
@@ -195,6 +200,13 @@ function checkReport(rep, results, { expectLesson, kind = 'none', navOnly = fals
       ri.secondAfterInterval === 1, 'cues=' + ri.secondAfterInterval);
     assert(results, 'con la pestaña oculta no suena nada',
       ri.whileHidden === 0, 'cues=' + ri.whileHidden);
+    // reminder-desktop-notification: oculto+vencido escala al canal de
+    // escritorio; el intento fallido queda dicho en el panel (fallar visible).
+    assert(results, 'la pestaña oculta intentó el canal de escritorio',
+      ri.notifAttempts >= 1, 'intentos=' + ri.notifAttempts);
+    assert(results, 'el panel dice que la notificación no se entregó (fallar visible)',
+      ri.notifStatusShown === true,
+      'mostrado=' + ri.notifStatusShown + ' texto=' + String(ri.notifStatusText || '').slice(0, 60));
     assert(results, 'volver y ponerse a trabajar pospone el recordatorio',
       ri.backToWork === 0, 'cues=' + ri.backToWork);
     assert(results, 'al volver y quedarse idle: UN cue, sin ráfaga',

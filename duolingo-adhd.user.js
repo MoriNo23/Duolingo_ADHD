@@ -171,6 +171,11 @@ const I18N = {
     // reminder-desktop-notification: textos de la notificación de escritorio
     notifTitle:      'Duolingo ADHD — recordatorio',
     notifBody:       'Es hora de volver a la lección.',
+    // ...y los del panel (toggle + fallar visible)
+    lblReminderNotif: 'Notificación de escritorio',
+    hintReminderNotif: 'Con la pestaña en segundo plano, el recordatorio salta como notificación del sistema. La emite el gestor de userscripts, no duolingo.com; nada sale de tu navegador.',
+    notifBlocked:    'La última notificación no se entregó: revisá si el sistema silencia notificaciones (No molestar en GNOME, Asistente de foco en Windows).',
+    notifUnsupported: 'Tu gestor de userscripts no ofrece notificaciones: con la pestaña oculta el recordatorio queda pendiente y suena al volver.',
   },
   en: {
     panelTitle:      'Progress bar segments (ADHD)',
@@ -224,6 +229,11 @@ const I18N = {
     // reminder-desktop-notification: desktop notification texts
     notifTitle:      'Duolingo ADHD — reminder',
     notifBody:       'Time to get back to your lesson.',
+    // ...and the panel's (toggle + failing visibly)
+    lblReminderNotif: 'Desktop notification',
+    hintReminderNotif: 'With the tab in the background, the reminder surfaces as a system notification. The userscript manager delivers it, not duolingo.com; nothing leaves your browser.',
+    notifBlocked:    'The last notification was not delivered: check whether your system is silencing notifications (Do Not Disturb on GNOME, Focus Assist on Windows).',
+    notifUnsupported: 'Your userscript manager does not provide notifications: while the tab is hidden the reminder stays pending and plays when you come back.',
   },
 };
 function tr(lang, key) { return (I18N[lang] && I18N[lang][key]) || I18N.es[key]; }
@@ -1211,6 +1221,11 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
   (function () {
     const stored = GM_getValue('adhd_config', {});
     const cfg = Object.assign({}, DEFAULTS, stored, { lang: stored.lang || detectLang(navigator.language) });
+    // reminder-desktop-notification: un valor corrupto o editado a mano del
+    // toggle de notificación cae al default — nunca queda en estado
+    // indefinido (con basura, la decisión `=== true` leería "apagada"
+    // mientras el panel mostrara otra cosa).
+    if (typeof cfg.reminderNotifEnabled !== 'boolean') cfg.reminderNotifEnabled = DEFAULTS.reminderNotifEnabled;
     function save() { GM_setValue('adhd_config', cfg); }
     // decay-timeline-visibility (D5): punto único de escritura de cfg. Antes
     // había 8 pares `cfg.x = ...; save();` dispersos (panel) y era fácil
@@ -1448,6 +1463,20 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
     }
     function syncReminder() { if (cfg.reminderEnabled) startReminder(); else stopReminder(); }
 
+    // reminder-desktop-notification: el panel dice lo que pasó con el último
+    // intento del canal de escritorio. Un toggle que lee "prendido" mientras
+    // nada llega es peor que no tener toggle (spec: el panel distingue
+    // entregando de bloqueado). Se limpia solo: el próximo intento que SÍ se
+    // entrega esconde el aviso, sin recargar nada.
+    function renderNotifStatus() {
+      const el = document.querySelector('#adhd-reminder-notif-status');
+      if (!el) return;
+      if (!notifDeliveryState) { el.style.display = 'none'; el.textContent = ''; return; }
+      el.style.display = '';
+      el.style.color = '#b41e1e';
+      el.textContent = tr(cfg.lang, notifDeliveryState === 'blocked' ? 'notifBlocked' : 'notifUnsupported');
+    }
+
     // Máquina de estados mínima: la decisión vive en reminderAction (pura,
     // testeable); el tick solo ejecuta lo que ella dicta. Si toca enfocado u
     // oculto queda UNO pendiente (sin mover el vencimiento), así nunca se
@@ -1484,6 +1513,7 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
             notifDeliveryState = r;
             reminderPending = true;
           }
+          renderNotifStatus();
           return;
         }
         if (now < pendingReturnAt) return;   // gracia tras volver a la pestaña
@@ -3373,6 +3403,9 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
           <div class="adhd-hint">${tr(cfg.lang, 'hintSoundCues')}</div>
           <label><input type="checkbox" id="adhd-reminder" ${cfg.reminderEnabled ? 'checked' : ''}> ${tr(cfg.lang, 'lblReminder')}</label>
           <div class="adhd-hint">${tr(cfg.lang, 'hintReminder')}</div>
+          <label><input type="checkbox" id="adhd-reminder-notif" ${cfg.reminderNotifEnabled ? 'checked' : ''}> ${tr(cfg.lang, 'lblReminderNotif')}</label>
+          <div class="adhd-hint">${tr(cfg.lang, 'hintReminderNotif')}</div>
+          <div class="adhd-hint" id="adhd-reminder-notif-status" style="display:none;"></div>
           <label for="adhd-reminder-secs">${tr(cfg.lang, 'lblReminderInterval')}: <span class="adhd-val" id="adhd-reminder-secs-val">${formatIntervalLabel(cfg.reminderSeconds)}</span></label>
           <input type="range" id="adhd-reminder-secs" min="${REMINDER_MIN_SECONDS}" max="${REMINDER_MAX_SECONDS}" step="15" value="${clampReminderSeconds(cfg.reminderSeconds)}" aria-label="${tr(cfg.lang, 'lblReminderInterval')}">
           <button id="adhd-test-sound">${tr(cfg.lang, 'btnTestSound')}</button>
@@ -3470,6 +3503,14 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
         setCfg('reminderEnabled', e.target.checked);
         syncReminder();
       });
+      // reminder-desktop-notification: el toggle del canal de escritorio.
+      // Sin syncReminder: el tick lee cfg en vivo, no hay ciclo de vida que
+      // reiniciar (spec: el cambio aplica sin recargar).
+      panel.querySelector('#adhd-reminder-notif').addEventListener('change', (e) => {
+        setCfg('reminderNotifEnabled', e.target.checked);
+      });
+      // El panel pinta el estado del último intento tal como esté.
+      renderNotifStatus();
       const reminderSecs = panel.querySelector('#adhd-reminder-secs');
       reminderSecs.addEventListener('input', () => {
         panel.querySelector('#adhd-reminder-secs-val').textContent = formatIntervalLabel(reminderSecs.value);

@@ -1621,6 +1621,57 @@ describe('reminder-desktop-notification: el canal de escritorio (GM_notification
   });
 });
 
+describe('reminder-desktop-notification: el panel falla visible', () => {
+  const src = publishedSource();
+
+  test('la sección de sonido tiene el toggle de notificación con id estable, persistido', () => {
+    assert.equal(/id="adhd-reminder-notif"/.test(src), true,
+      'falta el control de notificación con id estable');
+    const i = src.indexOf("querySelector('#adhd-reminder-notif')");
+    assert.ok(i > -1, 'falta el listener del toggle de notificación');
+    const cuerpo = src.slice(i, i + 220);
+    assert.equal(/setCfg\('reminderNotifEnabled', e\.target\.checked\)/.test(cuerpo), true,
+      'el toggle de notificación no persiste');
+  });
+
+  test('valor desconocido del toggle cae al default, no queda indefinido', () => {
+    const i = src.indexOf('adhd_config');
+    const carga = src.slice(i, i + 700);
+    assert.equal(/typeof cfg\.reminderNotifEnabled !== 'boolean'/.test(carga), true,
+      'la carga no normaliza un reminderNotifEnabled corrupto/editado a mano');
+    assert.equal(/cfg\.reminderNotifEnabled = DEFAULTS\.reminderNotifEnabled/.test(carga), true,
+      'el fallback no cae al default');
+  });
+
+  test('los mensajes de estado existen en las dos variantes (EN/ES)', () => {
+    assert.ok(C.I18N.es.notifBlocked, 'falta el mensaje de bloqueado (ES)');
+    assert.ok(C.I18N.en.notifBlocked, 'falta el mensaje de bloqueado (EN)');
+    assert.ok(C.I18N.es.notifUnsupported, 'falta el mensaje de manager sin API (ES)');
+    assert.ok(C.I18N.en.notifUnsupported, 'falta el mensaje de manager sin API (EN)');
+    assert.ok(C.I18N.es.lblReminderNotif && C.I18N.en.lblReminderNotif, 'falta la etiqueta del toggle');
+  });
+
+  test('el intento no entregado se escribe en el panel (y se limpia al entregar)', () => {
+    const i = src.indexOf('function renderNotifStatus');
+    assert.ok(i > -1, 'falta renderNotifStatus()');
+    const cuerpo = src.slice(i, i + 700);
+    assert.equal(/adhd-reminder-notif-status/.test(cuerpo), true,
+      'el estado no se escribe en el elemento del panel');
+    assert.equal(/notifBlocked/.test(cuerpo), true, 'no muestra el mensaje de bloqueado');
+    assert.equal(/notifUnsupported/.test(cuerpo), true, 'no distingue el manager sin API');
+    const tick = src.slice(src.indexOf('function reminderTick()'),
+      src.indexOf("document.addEventListener('visibilitychange'"));
+    assert.equal(/renderNotifStatus\(\)/.test(tick), true,
+      'el tick no actualiza el estado del panel tras un intento');
+    const seccion = src.slice(src.indexOf('// ===== Sección SONIDO'), src.indexOf('// ===== Sección DIARIO'));
+    assert.equal(/id="adhd-reminder-notif-status"/.test(seccion), true,
+      'la sección de sonido no tiene el elemento de estado');
+    const build = src.indexOf('panel.innerHTML = html');
+    assert.ok(build > -1 && src.indexOf('renderNotifStatus()', build) > build,
+      'el panel no pinta el estado actual al abrirse');
+  });
+});
+
 describe('add-field-qa-loop: plantilla del guion de campo', () => {
   const plantillaPath = path.join(__dirname, '..', 'qa', 'plantilla-guion.html');
 

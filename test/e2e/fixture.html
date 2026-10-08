@@ -46,6 +46,16 @@
   };
   window.GM_getValue = function (k, d) { return (k in store) ? store[k] : d; };
   window.GM_setValue = function (k, v) { store[k] = v; };
+  // reminder-desktop-notification: stub del canal de escritorio. El runner no
+  // tiene daemon de notificaciones: se registra cada intento (detalles
+  // completos) y se simula el caso NO ENTREGADO (error de entrega) — es la
+  // rama automatizable del panel que falla visible (la confirmación de que
+  // GNOME/Windows bloquean de verdad es del guion de campo).
+  window.__notifCalls = [];
+  window.GM_notification = function (details) {
+    window.__notifCalls.push(details);
+    throw new Error('e2e: notificación no entregada (sin daemon)');
+  };
   window.GM_info = { script: { version: 'e2e' } };
   window.GM_registerMenuCommand = function () {};
 
@@ -443,10 +453,13 @@
       var rng = document.querySelector('#adhd-reminder-secs');
       var val = document.querySelector('#adhd-reminder-secs-val');
       var btn = document.querySelector('#adhd-test-sound');
+      var notif = document.querySelector('#adhd-reminder-notif');
+      var notifStatus = document.querySelector('#adhd-reminder-notif-status');
       var out = {
-        present: !!(cues && rem && rng && btn && val),
+        present: !!(cues && rem && rng && btn && val && notif && notifStatus),
         cuesChecked: cues ? cues.checked : null,
         reminderChecked: rem ? rem.checked : null,
+        notifChecked: notif ? notif.checked : null,
         range: rng ? rng.value : null,
         rangeText: val ? val.textContent : null,
         rangeMin: rng ? rng.min : null,
@@ -470,6 +483,17 @@
         rem.checked = true;
         rem.dispatchEvent(new Event('change', { bubbles: true }));
         out.storedReminderOn = window.GM_getValue('adhd_config', {}).reminderEnabled;
+      }
+
+      // reminder-desktop-notification: el toggle del canal de escritorio
+      // persiste igual que los demás (setCfg), sin reiniciar nada.
+      if (notif) {
+        notif.checked = false;
+        notif.dispatchEvent(new Event('change', { bubbles: true }));
+        out.storedNotifOff = window.GM_getValue('adhd_config', {}).reminderNotifEnabled;
+        notif.checked = true;
+        notif.dispatchEvent(new Event('change', { bubbles: true }));
+        out.storedNotifOn = window.GM_getValue('adhd_config', {}).reminderNotifEnabled;
       }
 
       // El boton de prueba suena al toque: no tiene que romper nada (el audio
@@ -594,7 +618,13 @@
       out.c1 = c1;
       setHidden(true);
       window.__advance(50000);
-      return beat(2).then(function () { out.whileHidden = cueUnits() - c1; });
+      return beat(2).then(function () {
+        out.whileHidden = cueUnits() - c1;
+        // reminder-desktop-notification: oculto+vencido con la notificación
+        // activada escala al canal de escritorio — el stub registra cada
+        // intento. Sin sonido igual (los cues de arriba no se movieron).
+        out.notifAttempts = (window.__notifCalls || []).length;
+      });
     }).then(function () {
       // Vuelve y se pone a trabajar al instante: el pendiente espera.
       setHidden(false);
@@ -607,8 +637,20 @@
       return beat(2).then(function () {
         out.idleAfterReturn = cueUnits() - out.c1 - out.backToWork;
         try { delete document.hidden; } catch (e) {}   // devuelve el getter real
-        report.reminderIdle = out;
       });
+    }).then(function () {
+      // reminder-desktop-notification: fallar visible. Todos los intentos del
+      // canal de escritorio quedaron sin entregar (stub que revienta): el
+      // panel tiene que decirlo en vez de mostrar el toggle como si todo
+      // anduviera. Se lee con el panel abierto y se deja como se encontró.
+      var gear = document.querySelector('.adhd-btn');
+      var abierto = !!document.querySelector('#adhd-test-sound');
+      if (!abierto && gear) gear.click();
+      var st = document.querySelector('#adhd-reminder-notif-status');
+      out.notifStatusShown = st ? (st.style.display !== 'none' && st.textContent.length > 0) : false;
+      out.notifStatusText = st ? st.textContent : null;
+      if (!abierto && gear) gear.click();
+      report.reminderIdle = out;
     });
   }
 
