@@ -403,6 +403,50 @@ function compareCalmVsAnimated(animated, calm, results, label) {
   }
 }
 
+// calm-canvas-grayscale: la variante calmada es GRIS y cada peldaño tiene el
+// SUYO. Se mide sobre los pixeles realmente pintados (toneOf en el fixture),
+// no sobre constantes del codigo: (a) casi todo lo pintado es neutro y (b) la
+// luminancia media difiere entre peldaños. Umbrales modestos a proposito: el
+// render real tiene antialiasing y este archivo no se corre en local para
+// calibrar; lo estricto (>=1.5:1 entre valores del ramp) ya lo cubre el core.
+// Lo que no puede pasar es un efecto todavia a color (neutralidad por el
+// piso) ni tres peldaños indistinguibles (separacion).
+function checkCalmGrey(calm, results, label) {
+  const c = (calm && calm.fx) || [];
+  const porPeldaño = {};
+  for (const tier of ['racha', 'diamante', 'super']) {
+    porPeldaño[tier] = c.find((x) => x.tier === tier) || {};
+  }
+  const conDatos = ['racha', 'diamante', 'super'].filter((t) => {
+    const f = porPeldaño[t];
+    return f && f.greyFrac !== null && f.greyFrac !== undefined && f.greyLum !== null && f.greyLum !== undefined;
+  });
+  for (const tier of ['racha', 'diamante', 'super']) {
+    const f = porPeldaño[tier];
+    const gf = f.greyFrac;
+    assert(results, `la calma de ${tier} pinta en gris, no a color (${label})`,
+      gf !== null && gf !== undefined && gf >= 0.8,
+      'gris=' + (gf === null || gf === undefined ? 'sin datos' : (gf * 100).toFixed(0) + '%'));
+  }
+  // Separacion entre peldaños: si dos medias caen una encima de la otra, el
+  // ramp colapso en la practica aunque la tabla este bien.
+  if (conDatos.length === 3) {
+    const lums = conDatos.map((t) => porPeldaño[t].greyLum);
+    let minSep = Infinity;
+    for (let i = 0; i < lums.length; i++) {
+      for (let j = i + 1; j < lums.length; j++) {
+        minSep = Math.min(minSep, Math.abs(lums[i] - lums[j]));
+      }
+    }
+    assert(results, `los tres grises calmados se distinguen entre si (${label})`,
+      minSep >= 0.05,
+      'lums=' + lums.map((l) => l.toFixed(3)).join('/') + ' sepMin=' + minSep.toFixed(3));
+  } else {
+    assert(results, `los tres peldaños calmados tienen lectura de tono (${label})`, false,
+      'con datos=' + conDatos.join(','));
+  }
+}
+
 // ---------- main ----------
 async function main() {
   const bin = findBrowser();
@@ -427,6 +471,10 @@ async function main() {
     }
     compareCalmVsAnimated(reports['/lesson/'], reports['/lesson/calm-system/'], results, 'reduce del sistema');
     compareCalmVsAnimated(reports['/lesson/'], reports['/lesson/calm-never/'], results, 'nivel never');
+    // calm-canvas-grayscale: en las rutas calmadas, lo pintado es gris y cada
+    // peldaño tiene el suyo. Solo aca: en la ruta animada el color es lo correcto.
+    checkCalmGrey(reports['/lesson/calm-system/'], results, 'reduce del sistema');
+    checkCalmGrey(reports['/lesson/calm-never/'], results, 'nivel never');
     // (la ruta navonly no corre la fase de efectos: no entra en las comparaciones)
   } finally {
     server.close();

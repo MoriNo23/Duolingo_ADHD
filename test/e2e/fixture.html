@@ -359,6 +359,34 @@
     return { bits: bits, on: on, comps: countComponents(mask), ink: on / (PROBE_W * PROBE_H) };
   }
 
+  // calm-canvas-grayscale: hermana de maskOf para el tono. Sobre los pixeles
+  // con tinta (mismo corte relativo), que fraccion es neutra (canales iguales
+  // con tolerancia de antialiasing) y su luminancia media ponderada por alpha.
+  // Mezclar dos neutros sigue siendo neutro, asi que un efecto calmado bien
+  // griseado da ~1.0 aunque haya bordes suavizados; uno a color, no.
+  function toneOf(canvas) {
+    pctx.clearRect(0, 0, PROBE_W, PROBE_H);
+    pctx.drawImage(canvas, 0, 0, PROBE_W, PROBE_H);
+    var d = pctx.getImageData(0, 0, PROBE_W, PROBE_H).data;
+    var max = 0, i;
+    for (i = 3; i < d.length; i += 4) if (d[i] > max) max = d[i];
+    if (max < 8) return { n: 0, neutralFrac: null, lumMean: null };
+    var cut = max * 0.35, n = 0, neutral = 0, lumAcc = 0, alphaAcc = 0;
+    for (i = 0; i < d.length; i += 4) {
+      var a = d[i + 3];
+      if (a < cut) continue;
+      n++;
+      var r = d[i], g = d[i + 1], b = d[i + 2];
+      var spread = Math.max(r, g, b) - Math.min(r, g, b);
+      if (spread <= 6) neutral++;
+      var w = a / 255;
+      lumAcc += (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255 * w;
+      alphaAcc += w;
+    }
+    if (!n) return { n: 0, neutralFrac: null, lumMean: null };
+    return { n: n, neutralFrac: neutral / n, lumMean: alphaAcc > 0 ? lumAcc / alphaAcc : null };
+  }
+
   // Fraccion de pixeles con alpha arriba del umbral relativo. Version liviana de
   // maskOf (sin bitset ni componentes) para los bucles que solo preguntan
   // "¿dibujo algo?".
@@ -706,6 +734,10 @@
             s.last = window.__perf;
             s.bits.push(m.bits);
             s.series.push([m.comps, m.ink, window.__perf]);
+            // calm-canvas-grayscale: el tono viaja alineado con la serie, para
+            // promediarlo en la misma ventana de meseta que la forma.
+            if (!s.tones) s.tones = [];
+            s.tones.push(toneOf(el));
             if (m.comps > s.compsMax) s.compsMax = m.comps;
             if (m.ink > s.inkMax) s.inkMax = m.ink;
             // El re-render entra con el primer efecto ya visible: ahi se prueba
@@ -774,6 +806,21 @@
             var area2 = Math.max(s.series[postFirst][1], s.series[postLast][1]) * (PROBE_W * PROBE_H);
             postChange = area2 > 0 ? diff2 / area2 : null;
           }
+          // calm-canvas-grayscale: tono promedio en la ventana de meseta (la
+          // misma que shapeChange). greyFrac dice si es gris; greyLum dice
+          // CUAL gris: lo que distingue un peldano de otro sin mirar el tono.
+          var greyFrac = null, greyLum = null;
+          if (s.tones && first >= 0 && last > first) {
+            var tn = 0, tf = 0, tl = 0, tlw = 0;
+            for (var q = first; q <= last; q++) {
+              var tt = s.tones[q];
+              if (!tt || tt.n === 0 || tt.neutralFrac === null) continue;
+              tn++; tf += tt.neutralFrac;
+              if (tt.lumMean !== null) { tl += tt.lumMean; tlw++; }
+            }
+            if (tn > 0) greyFrac = tf / tn;
+            if (tlw > 0) greyLum = tl / tlw;
+          }
           return {
             tier: tier,
             visibleMs: span,
@@ -785,6 +832,8 @@
             ink: s.inkMax,
             afterSwapFrames: postFrames,
             afterSwapChange: postChange,
+            greyFrac: greyFrac,
+            greyLum: greyLum,
           };
         });
         resolve();

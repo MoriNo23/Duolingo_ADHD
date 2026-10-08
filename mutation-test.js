@@ -72,6 +72,12 @@ const MUTATORS = [
   // de campo: madera 1.29:1, bronce 1.09:1).
   c => firstReplace(c, /return contrastOfLuminances\(s, i\) >= contrastOfLuminances\(s, 1\) \? inkHex : '#ffffff';/, "return contrastOfLuminances(s, i) < contrastOfLuminances(s, 1) ? inkHex : '#ffffff';", 'cronoTextColor: emparejamiento invertido (elige el de MENOR contraste)'),
   c => firstReplace(c, /return contrastOfLuminances\(s, i\) >= contrastOfLuminances\(s, 1\) \? inkHex : '#ffffff';/, "return contrastOfLuminances(s, i) >= contrastOfLuminances(s, 1) ? '#ffffff' : '#ffffff';", 'cronoTextColor: rama de la tinta eliminada (siempre blanco)'),
+  // ---------- calm-canvas-grayscale: el ramp de grises de la calma ----------
+  // Si los tres peldaños resuelven el mismo gris, el par consecutivo mide 1.0
+  // y el test del piso lo mata. Si shadeGrey ignora el factor, su propio test
+  // (0.5 parte al medio) lo mata.
+  c => firstReplace(c, /const CALM_GREYS = \{ 3: '#565656', 4: '#9e9e9e', 5: '#e2e2e2' \};/, "const CALM_GREYS = { 3: '#808080', 4: '#808080', 5: '#808080' };", 'calmGreyFor: ramp colapsado a un gris unico'),
+  c => firstReplace(c, /Math\.round\(parseInt\(hex\.slice\(i, i \+ 2\), 16\) \* f\)/, 'Math.round(parseInt(hex.slice(i, i + 2), 16))', 'shadeGrey: factor ignorado (identidad)'),
 ];
 
 // ---------- correr los tests contra el SRC actual ----------

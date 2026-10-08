@@ -1646,3 +1646,67 @@ describe('fix-crono-contrast: el tick y el CSS del contador', () => {
       'la transición no cubre el fondo: el cambio de peldaño sería un salto');
   });
 });
+
+describe('calm-canvas-grayscale: rampa de grises por peldaño con efecto', () => {
+  const src = publishedSource();
+
+  // WCAG propia del test, independiente de la implementación (mismo patrón
+  // que la suite de fix-crono-contrast): el floor es una medición, no una
+  // constante copiada del código.
+  function lumHex(h) {
+    const v = [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16) / 255)
+      .map((c) => (c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4)));
+    return 0.2126 * v[0] + 0.7152 * v[1] + 0.0722 * v[2];
+  }
+  function ratio(a, b) {
+    const x = lumHex(a), y = lumHex(b);
+    return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05);
+  }
+  function esGris(h) {
+    const m = /^#([0-9a-fA-F]{2})([0-9a-fA-F]{2})([0-9a-fA-F]{2})$/.exec(h);
+    return !!m && m[1].toLowerCase() === m[2].toLowerCase() && m[2].toLowerCase() === m[3].toLowerCase();
+  }
+
+  test('los tres peldaños con efecto resuelven un gris cada uno', () => {
+    assert.equal(typeof C.calmGreyFor, 'function', 'falta calmGreyFor en el núcleo');
+    for (const rung of [3, 4, 5]) {
+      const g = C.calmGreyFor(rung);
+      assert.equal(esGris(g), true, `peldaño ${rung} no resuelve un gris neutro: ${g}`);
+    }
+  });
+
+  test('los dos pares consecutivos miden ≥1.5:1 (lo que el gris ingenuo falla)', () => {
+    const [r3, r4, r5] = [C.calmGreyFor(3), C.calmGreyFor(4), C.calmGreyFor(5)];
+    assert.ok(ratio(r3, r4) >= 1.5, `racha↔diamante ${ratio(r3, r4).toFixed(2)}:1 < 1.5:1`);
+    assert.ok(ratio(r4, r5) >= 1.5, `diamante↔super ${ratio(r4, r5).toFixed(2)}:1 < 1.5:1`);
+  });
+
+  test('el ramp no inventa grises para peldaños sin efecto ni lanza con basura', () => {
+    assert.equal(C.calmGreyFor(0), null, 'madera no tiene efecto canvas: debe ser null');
+    assert.equal(C.calmGreyFor(2), null, 'plata no tiene efecto canvas: debe ser null');
+    assert.equal(C.calmGreyFor(99), null, 'peldaño inexistente: debe ser null');
+    assert.equal(C.calmGreyFor('super'), null, 'la clave es el indice, no el id');
+  });
+
+  test('alcance pineado: el ramp vive solo en los tres efectos, nunca en el cronómetro', () => {
+    // Definición + export + 3 usos (uno por efecto). Cualquier otro uso
+    // (cronómetro, riel, segmentos) rompe este conteo a propósito: es la
+    // defensa del fix-crono-contrast contra grisar la capa informativa.
+    const n = (src.match(/calmGreyFor/g) || []).length;
+    assert.equal(n, 5, `calmGreyFor aparece ${n} veces, deben ser 5 (def + export + 3 efectos)`);
+    const tick = src.slice(src.indexOf('function startMiniCrono'), src.indexOf('function stopMiniCrono'));
+    assert.ok(tick.length > 1000, 'no se encontró la región del tick del cronómetro');
+    assert.equal(/calmGreyFor/.test(tick), false, 'el cronómetro referencia el ramp: prohibido por spec');
+  });
+
+  test('shadeGrey escala un gris sin sacarlo del eje neutro', () => {
+    assert.equal(typeof C.shadeGrey, 'function', 'falta shadeGrey en el núcleo');
+    assert.equal(C.shadeGrey('#808080', 1), '#808080', 'factor 1 es identidad');
+    const oscuro = C.shadeGrey('#808080', 0.5);
+    assert.equal(oscuro, '#404040', 'factor 0.5 parte al medio: ' + oscuro);
+    assert.equal(C.shadeGrey('#808080', 2), '#ffffff', 'clampa arriba, no se pasa de ff');
+    assert.equal(C.shadeGrey('#808080', 0), '#000000', 'factor 0 es negro');
+    assert.equal(C.shadeGrey('basura', 1), null, 'basura no lanza: null');
+    assert.equal(C.shadeGrey('#808080', NaN), null, 'factor NaN no lanza: null');
+  });
+});
