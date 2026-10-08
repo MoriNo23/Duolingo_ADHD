@@ -262,7 +262,8 @@ async function modoAtendido(page, errors) {
   //   --autoplay-policy=no-user-gesture (falsea el desbloqueo de audio),
   //   flags de background/throttling (falsean el recordatorio).
   // - Video, tracing y HAR: apagados por defecto en Playwright; NO activarlos
-  //   es la decision de RAM/disco. Una sola pestana, viewport chico, dpr 1.
+  //   es la decision de RAM/disco. Una sola pestana; viewport chico y dpr 1
+  //   SOLO en auto (en los modos con humano adentro, ventana real: ver abajo).
   const context = await chromium.launchPersistentContext(profileDir, {
     executablePath: bin,
     headless: !headed,
@@ -273,8 +274,15 @@ async function modoAtendido(page, errors) {
       '--mute-audio',
     ],
     args: ['--disable-gpu'],
-    viewport: { width: 1280, height: 720 },
-    deviceScaleFactor: 1,
+    // viewport: SOLO en auto (headless): nadie lo ve y la decision de RAM/disco
+    // (viewport chico, dpr 1) aplica. En tui/attended/--headed va SIN override
+    // (null): la pagina renderiza al tamano REAL de la ventana, que se puede
+    // maximizar. Hallazgo de campo (2026-10-08): con el override de 1280x720 la
+    // ventana mide 778px de alto y la pantalla es 1366x768 — la fila de
+    // respuestas de la leccion quedaba bajo el borde, imposible de clickear en
+    // la ronda de QA. Forzar el viewport en los modos con humano adentro
+    // domesticaba la ventana: justo lo que este probe dice querer evitar.
+    ...(headed ? { viewport: null } : { viewport: { width: 1280, height: 720 }, deviceScaleFactor: 1 }),
     acceptDownloads: false,
   });
 
