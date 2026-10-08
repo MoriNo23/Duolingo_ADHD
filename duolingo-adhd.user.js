@@ -17,6 +17,7 @@
 // @grant        GM_setValue
 // @grant        GM_addStyle
 // @grant        GM_xmlhttpRequest
+// @grant        GM_notification
 // @connect      fonts.googleapis.com
 // @connect      fonts.gstatic.com
 // @run-at       document-idle
@@ -102,6 +103,11 @@ const DEFAULTS = {
   soundCues: true,         // fanfarria del peldaño al cerrar un tramo
   reminderEnabled: true,   // recordatorio periódico mientras duolingo.com está abierto
   reminderSeconds: 60,     // intervalo del recordatorio (15–900 s, ver clampReminderSeconds)
+  // reminder-desktop-notification: escala a notificación de escritorio cuando
+  // la pestaña está oculta (el canal del manager, nunca el permiso del sitio).
+  // Arranca ENCENDIDO como los sonidos; una config guardada antes de este
+  // cambio la conserva (Object.assign pisa con el default solo lo faltante).
+  reminderNotifEnabled: true,
 };
 
 // ---------- timer-mode-ux constantes + preview (pure core) ----------
@@ -162,6 +168,9 @@ const I18N = {
     hintReminder:    'Suena cada cierto tiempo mientras duolingo.com está abierto, en cualquier pantalla — pero solo si llevas 45 s sin interactuar, para no interrumpirte mientras practicas.',
     lblReminderInterval: 'Cada cuánto',
     btnTestSound:    'Probar sonido',
+    // reminder-desktop-notification: textos de la notificación de escritorio
+    notifTitle:      'Duolingo ADHD — recordatorio',
+    notifBody:       'Es hora de volver a la lección.',
   },
   en: {
     panelTitle:      'Progress bar segments (ADHD)',
@@ -212,6 +221,9 @@ const I18N = {
     hintReminder:    'Plays on an interval while duolingo.com is open, on any screen — but only after 45 s without interaction, so it never interrupts you mid-lesson.',
     lblReminderInterval: 'Every',
     btnTestSound:    'Test sound',
+    // reminder-desktop-notification: desktop notification texts
+    notifTitle:      'Duolingo ADHD — reminder',
+    notifBody:       'Time to get back to your lesson.',
   },
 };
 function tr(lang, key) { return (I18N[lang] && I18N[lang][key]) || I18N.es[key]; }
@@ -540,6 +552,45 @@ function canPlayReminder(state) {
   return state.now - state.lastInteractionAt >= REMINDER_IDLE_MS;
 }
 
+// reminder-desktop-notification: la decisión "vence ahora, ¿qué hago?",
+// extraída del tick como función pura — es el paso que hace testeable el
+// canal de escritorio: la rama oculta deja de ser un `return false`
+// enterrado en canPlayReminder y pasa a ser una salida con nombre.
+// Contrato: 'play' (visible + idle: suena), 'notify' (oculto + notificación
+// activada: escala al escritorio — el SO entrega sin importar cuánto hace
+// que la pestaña no se ve, el throttling del browser no lo alcanza),
+// 'pending' (enfocado, u oculto sin canal: la deuda es UNA, nunca una
+// ráfaga), 'none' (antes de vencer o basura: nada que hacer). notifEnabled
+// estrictamente true: basura o desactivada → el silencio de antes.
+function reminderAction(state) {
+  if (!state) return 'none';
+  if (!Number.isFinite(state.now) || !Number.isFinite(state.nextAt)) return 'none';
+  if (state.now < state.nextAt) return 'none';
+  if (state.hidden) return state.notifEnabled === true ? 'notify' : 'pending';
+  if (!Number.isFinite(state.lastInteractionAt)) return 'none';
+  return state.now - state.lastInteractionAt >= REMINDER_IDLE_MS ? 'play' : 'pending';
+}
+
+// reminder-desktop-notification: el canal de escritorio. GM_notification es
+// del MANAGER (ya concedido en Tampermonkey): no se le pide permiso al sitio
+// y la notificación no se atribuye a duolingo.com — la Notification de la
+// página no se toca (spec: "Notification permission is not requested from
+// the page"). Feature-detect obligatorio: un @grant declarado no garantiza
+// que la función exista (Violentmonkey, Greasemonkey, Safari). silent: true
+// — el sonido lo pone el script si el audio está vivo; la notificación
+// pone el texto, así el aviso no depende del volumen del sistema.
+// 'sent' | 'blocked' (el intento no se entrega) | 'unsupported' (no hay
+// API: degradación al comportamiento anterior). JAMÁS lanza.
+function notifyReminder(title, text) {
+  try {
+    if (typeof GM_notification !== 'function') return 'unsupported';
+    GM_notification({ title: title, text: text, silent: true, timeout: 10000, duration: 10000 });
+    return 'sent';
+  } catch (e) {
+    return 'blocked';
+  }
+}
+
 // fix-crono-contrast: el contador lleva el color del peldaño como SUPERFICIE y
 // su dígito se empareja para ser legible sobre ella. Antes el color iba como
 // texto sobre una pill oscura (madera 1.29:1, bronce 1.09:1, super 1.40:1).
@@ -603,6 +654,7 @@ const CORE = {
   recordLesson, recordSeparators, recordRaceTime, resetJournal,
   // audio-cues: qué suena y cada cuánto (núcleo puro del sonido)
   cueForRung, clampReminderSeconds, formatIntervalLabel, canPlayReminder,
+  reminderAction, notifyReminder,
   SOUND_CUE_IDS, RUNG_CUES, SATISFYING_CUES,
   REMINDER_MIN_SECONDS, REMINDER_MAX_SECONDS, REMINDER_DEFAULT_SECONDS, REMINDER_IDLE_MS,
   // fix-crono-contrast: par superficie/dígito legible del contador
@@ -1366,6 +1418,11 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
     // No depende de la barra ni de la pantalla: suena en cualquier screen.
     let reminderTimer = 0, reminderNextAt = 0, reminderPending = false;
     let lastInteractionAt = 0, pendingReturnAt = 0;
+    // reminder-desktop-notification: último resultado del canal de escritorio
+    // ('blocked' | 'unsupported' | null = entregada). El panel lo muestra
+    // (3.x): un toggle que dice "on" mientras nada llega es peor que no tener
+    // toggle. Se limpia en el próximo intento que SÍ se entrega (spec).
+    let notifDeliveryState = null;
     const REMINDER_TICK_MS = 1000;
     const REMINDER_RETURN_GRACE_MS = 5000;
     // Los seis gestos que cuentan como "estás usando la página". Capture para
@@ -1391,18 +1448,42 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
     }
     function syncReminder() { if (cfg.reminderEnabled) startReminder(); else stopReminder(); }
 
-    // Máquina de estados mínima: si toca enfocado u oculto queda UNO pendiente
-    // (sin mover el vencimiento), así nunca se acumula deuda ni suena una ráfaga
-    // al volver; suena cuando el idle lo permite y el próximo intervalo nace de
-    // ESE momento (spec: "plays once the user becomes idle", "at most one
-    // reminder instead of a burst").
+    // Máquina de estados mínima: la decisión vive en reminderAction (pura,
+    // testeable); el tick solo ejecuta lo que ella dicta. Si toca enfocado u
+    // oculto queda UNO pendiente (sin mover el vencimiento), así nunca se
+    // acumula deuda ni suena una ráfaga al volver; suena cuando el idle lo
+    // permite y el próximo intervalo nace de ESE momento (spec: "plays once
+    // the user becomes idle", "at most one reminder instead of a burst").
     function reminderTick() {
       try {
         const ms = clampReminderSeconds(cfg.reminderSeconds) * 1000;
         const now = Date.now();
-        if (now < reminderNextAt) return;
-        if (!canPlayReminder({ now, lastInteractionAt, hidden: document.hidden })) {
+        const action = reminderAction({
+          now, nextAt: reminderNextAt, hidden: document.hidden,
+          lastInteractionAt, notifEnabled: cfg.reminderNotifEnabled,
+        });
+        if (action === 'none') return;
+        if (action === 'pending') {
           reminderPending = true;
+          return;
+        }
+        if (action === 'notify') {
+          // reminder-desktop-notification: la pestaña está oculta — el canal
+          // es el escritorio. Entregada: el próximo intervalo nace de AHORA
+          // (sin deuda acumulada) y el mismo cue suena junto si el audio está
+          // vivo (playCue degrada en silencio si no). No entregada (sin API o
+          // con error): el comportamiento de antes — queda UNO pendiente — y
+          // el estado queda registrado para que el panel lo diga.
+          const r = notifyReminder(tr(cfg.lang, 'notifTitle'), tr(cfg.lang, 'notifBody'));
+          if (r === 'sent') {
+            playCue('reminder');
+            reminderPending = false;
+            reminderNextAt = Date.now() + ms;
+            notifDeliveryState = null;
+          } else {
+            notifDeliveryState = r;
+            reminderPending = true;
+          }
           return;
         }
         if (now < pendingReturnAt) return;   // gracia tras volver a la pestaña

@@ -1425,20 +1425,36 @@ describe('remind-only-when-idle: el recordatorio solo suena en idle', () => {
     const i = src.indexOf('function reminderTick()');
     assert.ok(i > -1, 'falta reminderTick()');
     const cuerpo = src.slice(i, src.indexOf("document.addEventListener('visibilitychange'", i));
-    // El gate de idle vive en el núcleo puro y el tick lo consulta.
-    assert.equal(/canPlayReminder\(\{ now, lastInteractionAt, hidden: document\.hidden \}\)/.test(cuerpo), true,
-      'el tick no consulta el gate de idle');
+    // reminder-desktop-notification: el gate de idle vive en el núcleo puro
+    // (reminderAction) y el tick DELEGA en él con el estado real. Se pinea la
+    // delegación y el estado que viaja, no el formato literal de la llamada.
+    assert.equal(/reminderAction\(\{/.test(cuerpo), true,
+      'el tick no consulta la decisión pura (reminderAction)');
+    assert.equal(/hidden: document\.hidden/.test(cuerpo), true,
+      'el tick no pasa el estado de visibilidad a la decisión');
+    assert.equal(/lastInteractionAt,/.test(cuerpo), true,
+      'el tick no pasa la última interacción a la decisión');
     assert.equal(/reminderPending = true/.test(cuerpo), true, 'no queda pendiente cuando toca enfocado');
     // Pendiente ≠ vencido de nuevo: el branch que no suena NO reagenda.
     const pendiente = cuerpo.slice(cuerpo.indexOf('reminderPending = true'),
       cuerpo.indexOf('reminderPending = true') + 80);
     assert.equal(/reminderNextAt\s*=/.test(pendiente), false,
       'el branch pendiente reagenda: acumularía deuda');
-    // El único reagenda del tick nace del momento en que SONÓ.
-    assert.equal((cuerpo.match(/reminderNextAt =/g) || []).length, 1,
-      'el tick reagenda más de una vez');
-    assert.ok(cuerpo.indexOf("playCue('reminder')") < cuerpo.indexOf('reminderNextAt ='),
-      'el próximo intervalo no nace del momento del play');
+    // reminder-desktop-notification: con DOS canales hay DOS reagenda — uno
+    // por entrega real. El audible nace del cue; el oculto, de una notificación
+    // que SÍ se entregó ('sent'). Ninguno nace de un intento fallido, y el
+    // branch pendiente (arriba) sigue sin reagenda: nunca ráfaga.
+    const reagenda = (cuerpo.match(/reminderNextAt =/g) || []).length;
+    assert.equal(reagenda, 2, 'el tick reagenda más veces que canales entrega');
+    const ramaNotify = cuerpo.slice(cuerpo.indexOf("action === 'notify'"), cuerpo.indexOf('pendingReturnAt'));
+    assert.equal((ramaNotify.match(/reminderNextAt =/g) || []).length, 1,
+      'la rama notify reagenda más de una vez');
+    assert.ok(ramaNotify.indexOf("r === 'sent'") < ramaNotify.indexOf('reminderNextAt ='),
+      'el reagenda del canal oculto no nace de una entrega confirmada');
+    // El reagenda audible nace del momento en que SONÓ (último cue → último
+    // reagenda: el camino audible es el final del tick).
+    assert.ok(cuerpo.lastIndexOf("playCue('reminder')") < cuerpo.lastIndexOf('reminderNextAt ='),
+      'el próximo intervalo audible no nace del momento del play');
   });
 
   test('al volver de una pestaña oculta: gracia de 5 s y reset solo si nada pendía', () => {
@@ -1468,6 +1484,140 @@ describe('remind-only-when-idle: el recordatorio solo suena en idle', () => {
     const stop = src.slice(src.indexOf('function stopReminder()'), src.indexOf('function startReminder()'));
     assert.equal(/document\.removeEventListener\(ev, stampInteraction, true\)/.test(stop), true,
       'apagar no retira los listeners: costo cero roto');
+  });
+});
+
+describe('reminder-desktop-notification: la decisión vence-ahora-¿qué-hago? (reminderAction)', () => {
+  const IDLE = C.REMINDER_IDLE_MS;
+  // Un recordatorio vencido justito (now == nextAt), visible, con el idle
+  // exacto: el caso canónico del camino audible.
+  const due = (over) => ({
+    now: 1000000 + (over || 0), nextAt: 1000000,
+    hidden: false, lastInteractionAt: 1000000 - IDLE, notifEnabled: false,
+  });
+
+  test('visible + idle → play: el camino audible de siempre', () => {
+    assert.equal(C.reminderAction(due()), 'play');
+  });
+
+  test('visible + enfocado → pending: la deuda es una y no se pierde', () => {
+    const s = due();
+    s.lastInteractionAt = s.now - 1000;   // interactuó hace 1 s
+    assert.equal(C.reminderAction(s), 'pending');
+  });
+
+  test('oculto + notificación activada → notify: escala al canal de escritorio', () => {
+    const s = due();
+    s.hidden = true; s.notifEnabled = true;
+    assert.equal(C.reminderAction(s), 'notify');
+  });
+
+  test('oculto + notificación desactivada → pending: el comportamiento anterior, exacto', () => {
+    const s = due();
+    s.hidden = true; s.notifEnabled = false;
+    assert.equal(C.reminderAction(s), 'pending');
+  });
+
+  test('oculto 30 min (más allá del umbral de throttling de 5 min) → notify igual', () => {
+    // El throttling de Chrome cae a 1 wake/min a los 5 min oculto: para la
+    // página "oculto un rato" y "oculto media hora" llegan igual al tick. La
+    // decisión no puede depender de cuánto hace que no se ve la pestaña —
+    // este es el caso que documenta por qué existe la rama (tasks 1.2).
+    const s = due();
+    s.hidden = true; s.notifEnabled = true;
+    s.now = s.nextAt + 30 * 60 * 1000;
+    assert.equal(C.reminderAction(s), 'notify');
+  });
+
+  test('antes del vencimiento → none, aunque todo lo demás invite a sonar', () => {
+    const s = due(-1);   // ahora = vencimiento - 1 ms
+    assert.equal(C.reminderAction(s), 'none');
+    s.hidden = true; s.notifEnabled = true;
+    assert.equal(C.reminderAction(s), 'none');
+  });
+
+  test('basura y NaN → none: la decisión nunca inventa trabajo', () => {
+    assert.equal(C.reminderAction(null), 'none');
+    assert.equal(C.reminderAction(undefined), 'none');
+    assert.equal(C.reminderAction({}), 'none');
+    assert.equal(C.reminderAction({ now: NaN, nextAt: 0, hidden: false, lastInteractionAt: 0, notifEnabled: true }), 'none');
+    assert.equal(C.reminderAction({ now: 5, nextAt: NaN, hidden: true, lastInteractionAt: 0, notifEnabled: true }), 'none');
+    assert.equal(C.reminderAction({ now: 5, nextAt: 0, hidden: false, lastInteractionAt: NaN, notifEnabled: true }), 'none');
+  });
+
+  test('notifEnabled basura → pending: sin elección explícita, el silencio de antes', () => {
+    const s = due();
+    s.hidden = true; s.notifEnabled = 'garbage';
+    assert.equal(C.reminderAction(s), 'pending');
+  });
+
+  test('el umbral de idle es inclusivo, igual que canPlayReminder', () => {
+    const s = due();
+    s.lastInteractionAt = s.now - IDLE;
+    assert.equal(C.reminderAction(s), 'play');
+    s.lastInteractionAt = s.now - IDLE + 1;
+    assert.equal(C.reminderAction(s), 'pending');
+  });
+});
+
+describe('reminder-desktop-notification: el canal de escritorio (GM_notification)', () => {
+  // Crudo, CON metadata: el @grant vive en el bloque ==UserScript==.
+  const raw = fs.readFileSync(publishedPath(), 'utf8');
+  const body = publishedSource();
+
+  test('el @grant de GM_notification está declarado en la metadata', () => {
+    assert.equal(/^\/\/ @grant\s+GM_notification$/m.test(raw), true,
+      'falta el @grant: sin él el manager no expone GM_notification y el canal muere en silencio');
+  });
+
+  test('jamás se toca la Notification del sitio: ni permiso ni constructor', () => {
+    assert.equal(/Notification\.requestPermission/.test(body), false,
+      'pedir permiso lo atribuiría a duolingo.com (spec: la notificación sale del manager)');
+    assert.equal(/new Notification\s*\(/.test(body), false,
+      'la notificación no puede salir de la página: le daría al sitio un permiso que nunca pidió');
+  });
+
+  test('feature-detect antes de llamar: un @grant declarado no garantiza la función', () => {
+    const i = body.indexOf('function notifyReminder(');
+    assert.ok(i > -1, 'falta notifyReminder()');
+    const cuerpo = body.slice(i, i + 400);
+    assert.equal(/typeof GM_notification !== 'function'/.test(cuerpo), true,
+      'sin feature-detect el recordatorio revienta en Violentmonkey/Greasemonkey/Safari');
+  });
+
+  test('fallback: GM_notification ausente → unsupported, sin lanzar', () => {
+    const had = globalThis.GM_notification;
+    delete globalThis.GM_notification;
+    try {
+      assert.equal(C.notifyReminder('t', 'b'), 'unsupported');
+    } finally { if (had !== undefined) globalThis.GM_notification = had; }
+  });
+
+  test('fallback: la decisión no depende de la API — oculto+notif sigue siendo notify', () => {
+    const had = globalThis.GM_notification;
+    delete globalThis.GM_notification;
+    try {
+      const s = { now: 100, nextAt: 0, hidden: true, lastInteractionAt: 0, notifEnabled: true };
+      assert.equal(C.reminderAction(s), 'notify');
+    } finally { if (had !== undefined) globalThis.GM_notification = had; }
+  });
+
+  test('GM_notification que revienta → blocked: el intento no se entrega, sin lanzar', () => {
+    globalThis.GM_notification = () => { throw new Error('daemon caído'); };
+    try {
+      assert.equal(C.notifyReminder('t', 'b'), 'blocked');
+    } finally { delete globalThis.GM_notification; }
+  });
+
+  test('GM_notification viva → sent, con silent: el sonido lo pone el script', () => {
+    let seen = null;
+    globalThis.GM_notification = (d) => { seen = d; };
+    try {
+      assert.equal(C.notifyReminder('Título', 'Cuerpo'), 'sent');
+      assert.equal(seen && seen.silent, true, 'la notificación no debe sonar por sí sola');
+      assert.equal(seen && seen.title, 'Título');
+      assert.equal(seen && seen.text, 'Cuerpo');
+    } finally { delete globalThis.GM_notification; }
   });
 });
 
