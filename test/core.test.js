@@ -723,61 +723,58 @@ describe('animations-panel-setting: el control esta en el panel', () => {
   });
 });
 
-describe('animations-panel-setting: el kill switch solo silencia efectos', () => {
+describe('seg-skin-earned-at-close: el kill switch calla el MOVIMIENTO de la piel, no su identidad', () => {
   const src = publishedSource();
 
-  // Selectores del bloque, sin los comentarios que los mencionan.
-  function selectoresDelBloque() {
-    const b = src.match(/\/\* =+ animations-panel-setting: kill switch[\s\S]*?display:none; \}/);
+  // El contrato viejo ("solo silencia efectos, las pieles quedan fuera") lo
+  // invierte este change: el movimiento de las pieles ES motion (flicker,
+  // degradado animado, glow) y muere bajo calma; la identidad (color,
+  // composicion del degradado, textura) es material y sobrevive como frame
+  // estatico. Ver el delta MODIFIED de motion-preference en el change.
+  function bloqueKill() {
+    const b = src.match(/\/\* =+ animations-panel-setting: kill switch[\s\S]*?`\);/);
     assert.ok(b, 'el bloque del kill switch tiene que existir en el archivo publicado');
-    const sinComentarios = b[0].replace(/\/\*[\s\S]*?\*\//g, '');
-    return sinComentarios.slice(0, sinComentarios.indexOf('{'));
+    return b[0].replace(/\/\*[\s\S]*?\*\//g, '');
   }
 
-  const PIELES = [
-    '.adhd-rung-racha', '.adhd-rung-diamante', '.adhd-rung-super',
-    '.adhd-ember', '.adhd-sparkle', '.adhd-shine',
-    'adhd-rung-madera::before', 'adhd-rung-bronce::before', 'adhd-rung-plata::before',
-  ];
-  const EFECTOS = [
-    '.adhd-loss-flash', '.adhd-halo', '.adhd-rung-prev',
-    '.adhd-rail-head::after', '.adhd-rail-head.urgent', '.adhd-rail-head.adhd-rail-wrap',
-    '.adhd-part2', '.adhd-ring', '.adhd-seg.adhd-blink', '.adhd-seg.adhd-legendary',
-  ];
-
-  test('las pieles de peldaño NO estan en el bloque', () => {
-    const sel = selectoresDelBloque();
-    for (const x of PIELES) {
-      assert.equal(sel.includes(x), false, x + ' no deberia estar en el kill switch');
+  test('el movimiento de las pieles altas entra al switch', () => {
+    const b = bloqueKill();
+    for (const x of ['body.adhd-motion-off .adhd-rung-racha',
+                    'body.adhd-motion-off .adhd-rung-diamante',
+                    'body.adhd-motion-off .adhd-rung-super']) {
+      assert.ok(b.includes(x), x + ': el flicker/el degradado animado son motion');
     }
   });
 
-  test('los efectos SI estan en el bloque', () => {
-    const sel = selectoresDelBloque();
-    for (const x of EFECTOS) {
-      assert.equal(sel.includes(x), true, x + ' deberia estar en el kill switch');
+  test('los ornamentos no se renderizan bajo calma (display none en el switch)', () => {
+    const b = bloqueKill();
+    assert.ok(b.includes('body.adhd-motion-off .adhd-rung-deco'),
+      'embers/sparkles son ornamento: cero nodos visibles bajo calma');
+    assert.ok(b.includes('body.adhd-motion-off .adhd-seg.adhd-legendary::before'),
+      'las franjas blancas del legendario son ornamento');
+    assert.ok(b.includes('body.adhd-motion-off .adhd-seg.adhd-legendary .adhd-sweep'),
+      'el sweep del legendario es ornamento');
+    assert.ok(b.includes('body.adhd-motion-off .adhd-seg.adhd-legendary .adhd-flash'),
+      'el flash del legendario es ornamento');
+  });
+
+  test('la identidad sobrevive: el bloque no toca background ni borra segmentos', () => {
+    const b = bloqueKill();
+    assert.equal(/background/.test(b), false,
+      'borrar el gradiente seria borrar la identidad: es material, no motion');
+    assert.equal(/body\.adhd-motion-off \.adhd-seg\s*[,{]/.test(b), false,
+      'display:none/animation sobre el segmento pelado borraria la identidad');
+  });
+
+  test('los efectos historicos siguen en el bloque', () => {
+    const b = bloqueKill();
+    for (const x of ['.adhd-loss-flash', '.adhd-halo', '.adhd-rung-prev',
+                     '.adhd-rail-head::after', '.adhd-part2', '.adhd-ring',
+                     '.adhd-seg.adhd-blink', '.adhd-seg.adhd-legendary']) {
+      assert.ok(b.includes(x), x + ' sigue en el kill switch');
     }
-  });
-
-  test('el bloque usa la clase body.adhd-motion-off, no @media', () => {
-    // Con @media el nivel del usuario no podria silenciar por CSS, y el
-    // 'always' no tendria contraparte en la hoja de estilos. Se chequea sobre
-    // el bloque SIN comentarios, porque el comentario explica la mudanza y
-    // menciona el @media anterior a proposito.
-    const b = src.match(/\/\* =+ animations-panel-setting: kill switch[\s\S]*?display:none; \}/)[0]
-      .replace(/\/\*[\s\S]*?\*\//g, '');
-    assert.equal(/@media/.test(b), false);
-    assert.equal(/body\.adhd-motion-off/.test(b), true);
-    assert.equal(src.includes('body.adhd-motion-off'), true);
-  });
-
-  test('reintroducir una piel en el bloque rompe este test', () => {
-    // El test tiene que ser sensible: si alguien agrega .adhd-shine o
-    // .adhd-rung-super de vuelta, el caso de arriba falla.
-    const sel = selectoresDelBloque();
-    const contaminado = sel + ', body.adhd-motion-off .adhd-shine';
-    assert.equal(contaminado.includes('.adhd-shine'), true, 'el detector tiene que ver la contaminacion');
-    assert.equal(PIELES.some(x => contaminado.includes(x)), true);
+    assert.equal(/@media/.test(b), false, 'la clase body es la fuente unica, no @media');
+    assert.ok(/body\.adhd-motion-off/.test(b));
   });
 });
 
@@ -1787,6 +1784,232 @@ describe('tier-motion-per-seg: el control del panel', () => {
     }
     assert.equal(/cfg\.tierMotionFloor === 3 \? ' selected' : ''/.test(cuerpo), true,
       'el select no marca la opción actual desde cfg.tierMotionFloor');
+  });
+});
+
+describe('seg-skin-earned-at-close: dormantTone (el tono dormido)', () => {
+  // El tono dormido desatura a LUMINANCIA CONSTANTE: mezcla hacia el gris de
+  // la propia luminancia en espacio lineal. Eso preserva el orden de la
+  // escalera por construccion (Y dormido = Y vivo) y el matiz lineal exacto;
+  // solo la croma se escala. Nunca un gris uniforme (el colapso 1.01:1 de
+  // Plata<->Racha que la spec motion-preference deja registrado).
+  function hueOf(hex) {
+    const [r, g, b] = C.hexToRgb(hex).map((v) => v / 255);
+    const mx = Math.max(r, g, b), mn = Math.min(r, g, b);
+    if (mx === mn) return null;
+    const d = mx - mn;
+    let h;
+    if (mx === r) h = ((g - b) / d) % 6;
+    else if (mx === g) h = (b - r) / d + 2;
+    else h = (r - g) / d + 4;
+    return (h * 60 + 360) % 360;
+  }
+
+  const LADDER_RUNGS = C.RUNGS.map((r) => r.from); // 6 peldaños de la escalera
+  const LADDER_RARITY = C.RARITY.map((r) => r.color); // 5 rarezas posicionales
+
+  test('entrada inválida → null (nunca lanza)', () => {
+    assert.equal(C.dormantTone('no-hex'), null);
+    assert.equal(C.dormantTone('#12345'), null);
+    assert.equal(C.dormantTone('#12345g'), null);
+    assert.equal(C.dormantTone(null), null);
+    assert.equal(C.dormantTone(42), null);
+  });
+
+  test('desatura de verdad: la racha dormida no es la racha viva', () => {
+    assert.notEqual(C.dormantTone('#ff9600'), '#ff9600');
+  });
+
+  test('el gris puro se queda como es (ya es quieto)', () => {
+    assert.equal(C.dormantTone('#808080'), '#808080');
+    assert.equal(C.dormantTone('#ffffff'), '#ffffff');
+    assert.equal(C.dormantTone('#000000'), '#000000');
+  });
+
+  test('acepta rgb(...) — levelColor interpola en ese formato con 6+ tramos', () => {
+    const porCanal = C.dormantTone('rgb(255,150,0)');
+    const porHex = C.dormantTone('#ff9600');
+    assert.equal(porCanal, porHex);
+    assert.notEqual(porCanal, null);
+  });
+
+  test('la luminancia se preserva (Y dormido = Y vivo): no aclara ni oscurece', () => {
+    for (const hex of [...LADDER_RUNGS, ...LADDER_RARITY, C.LEGENDARY_ANCHOR]) {
+      const yVivo = C.hexLuminance(hex);
+      const yDormido = C.hexLuminance(C.dormantTone(hex));
+      assert.ok(Math.abs(yVivo - yDormido) < 0.01,
+        hex + ': Y cambio de ' + yVivo + ' a ' + yDormido);
+    }
+  });
+
+  test('el orden de luminancia sobrevive par a par en ambas escaleras', () => {
+    for (const ladder of [LADDER_RUNGS, LADDER_RARITY]) {
+      const Y = ladder.map((h) => C.hexLuminance(h));
+      const Yd = ladder.map((h) => C.hexLuminance(C.dormantTone(h)));
+      for (let i = 0; i < Y.length; i++) {
+        for (let j = 0; j < Y.length; j++) {
+          if (i === j) continue;
+          assert.equal(Math.sign(Yd[i] - Yd[j]), Math.sign(Y[i] - Y[j]),
+            'el par (' + ladder[i] + ',' + ladder[j] + ') invirtio su orden de luminancia');
+        }
+      }
+    }
+  });
+
+  test('inyectividad: ningun par de la escalera colapsa a un mismo tono', () => {
+    for (const ladder of [LADDER_RUNGS, LADDER_RARITY]) {
+      const tones = ladder.map((h) => C.dormantTone(h));
+      assert.equal(new Set(tones).size, tones.length,
+        'hay tonos repetidos: ' + tones.join(','));
+    }
+  });
+
+  test('el matiz sobrevive: patron de canales y hue dentro de tolerancia', () => {
+    // La mezcla a luminancia constante preserva la direccion de croma lineal,
+    // no el angulo HSL exacto: el hue puede derivar unos grados en los muy
+    // saturados. Lo que no puede es cambiar de familia ni de canal dominante.
+    for (const hex of [...LADDER_RUNGS, ...LADDER_RARITY, C.LEGENDARY_ANCHOR]) {
+      const orig = C.hexToRgb(hex);
+      const dorm = C.hexToRgb(C.dormantTone(hex));
+      const rank = (c) => [0, 1, 2].sort((a, b) => c[b] - c[a]);
+      assert.deepEqual(rank(dorm), rank(orig),
+        hex + ': el canal dominante cambio (' + orig + ' -> ' + dorm + ')');
+      const hO = hueOf(hex), hD = hueOf(C.dormantTone(hex));
+      if (hO !== null) {
+        const drift = Math.min(Math.abs(hO - hD), 360 - Math.abs(hO - hD));
+        assert.ok(drift <= 20, hex + ': el hue derivo ' + drift + ' grados');
+      }
+    }
+  });
+});
+
+describe('seg-skin-earned-at-close: el CSS del estado dormido', () => {
+  const src = publishedSource();
+
+  function bloqueDormido() {
+    const m = src.match(/\/\* =+ seg-skin-earned-at-close: el tramo dormido[\s\S]*?(?=\/\* =+ animations-panel-setting: kill switch)/);
+    assert.ok(m, 'el bloque CSS del tramo dormido tiene que existir en el archivo publicado');
+    return m[0].replace(/\/\*[\s\S]*?\*\//g, '');
+  }
+
+  test('consume el tono por var y pisa las pieles (importante)', () => {
+    const b = bloqueDormido();
+    assert.match(b, /\.adhd-dormant\s*\{[^}]*background:\s*var\(--adhd-dormant[^}]*!important/,
+      'la regla dormida tiene que consumir --adhd-dormant y ganarle a los skins de rung');
+  });
+
+  test('sin loops ambientales: nada de animation, solo el swap de tono transiciona', () => {
+    const b = bloqueDormido();
+    assert.equal(/animation\s*:/.test(b), false,
+      'el estado dormido no puede introducir animacion ambiente');
+    assert.match(b, /transition:\s*background-color/,
+      'la caida de peldaño transiciona el tono nativo (el crossfade de pieles ya no aplica al activo)');
+  });
+
+  test('pseudo-elementos y ornamentos callados mientras llena', () => {
+    const b = bloqueDormido();
+    assert.match(b, /\.adhd-seg\.adhd-dormant::before[\s\S]*?::after\s*\{[^}]*content:\s*none\s*!important/,
+      'los sweeps de peldaño bajo y los shines del legendario viven en ::before/::after');
+    assert.match(b, /\.adhd-seg\.adhd-dormant \.adhd-sweep[\s\S]*?\.adhd-flash[\s\S]*?display:\s*none\s*!important/,
+      'el sweep y el flash del legendario se callan mientras llena');
+  });
+
+  test('la opacidad del llenado no se toca (es progreso, no decoracion)', () => {
+    const b = bloqueDormido();
+    assert.equal(/opacity/.test(b), false,
+      'el ramp de opacidad del modo barra es llenado, no decoracion: queda afuera');
+  });
+});
+
+describe('seg-skin-earned-at-close: el tramo que llena es dormido', () => {
+  const src = publishedSource();
+
+  function cuerpoDe(nombre) {
+    const i = src.indexOf('function ' + nombre + '(');
+    assert.ok(i > -1, 'no existe ' + nombre);
+    return src.slice(i, src.indexOf('\n    }', i));
+  }
+
+  test('applyProjectedRung viste el tono dormido, no la piel', () => {
+    const c = cuerpoDe('applyProjectedRung');
+    assert.match(c, /classList\.add\('adhd-dormant'\)/,
+      'el tramo activo tiene que llevar la clase de estado dormido');
+    assert.match(c, /dormantTone\(RUNGS\[projected\]\.from\)/,
+      'el tono sale del peldaño proyectado');
+    assert.match(c, /setProperty\('--adhd-dormant'/,
+      'el tono llega al CSS por la custom property');
+  });
+
+  test('la reversión 6.4: el activo no decora ni crossfadea pieles', () => {
+    const c = cuerpoDe('applyProjectedRung');
+    assert.equal(/addRungDecorations\(/.test(c), false,
+      'el tramo activo no puede crear embers/sparkles (la reversión del 6.4)');
+    assert.equal(/crossFadeRung\(/.test(c), false,
+      'el tono plano transiciona nativo: el crossfade de pieles no corre en el activo');
+    assert.match(c, /querySelectorAll\('\.adhd-rung-deco'\)\.forEach\(d => d\.remove\(\)\)/,
+      'las decoraciones heredadas se limpian igual');
+    assert.match(c, /flashLoss\(segEl\)/,
+      'el flash de escalón a la baja sigue: es informativo, no ambientación');
+  });
+
+  test('la urgencia sigue viva en el activo (blink-hard)', () => {
+    const c = cuerpoDe('applyProjectedRung');
+    assert.match(c, /classList\.toggle\('adhd-blink-hard'/,
+      'el blink de presupuesto quemado es urgencia, no celebración');
+  });
+
+  test('el sliding shine muere en el activo; el edge queda', () => {
+    const c = cuerpoDe('ensureActiveFx');
+    assert.equal(/adhd-shine/.test(c), false,
+      'el sliding shine es ambientación: no puede existir en el tramo dormido');
+    assert.match(c, /adhd-edge/,
+      'el borde del llenado es progreso: se queda');
+  });
+
+  test('el legendario duerme mientras llena (modo barra)', () => {
+    const m = src.match(/if \(seg\.classList\.contains\('adhd-legendary'\)\) \{[\s\S]*?return;\n        \}/);
+    assert.ok(m, 'la rama del legendario tiene que existir en renderSegments');
+    assert.match(m[0], /classList\.toggle\('adhd-dormant'/,
+      'el legendario alterna el dormido con el estado de llenado');
+    assert.match(m[0], /LEGENDARY_ANCHOR/,
+      'el tono del legendario dormido sale del ancla violeta del gradiente épico');
+  });
+
+  test('modo barra: el activo posicional también duerme, el pasado despierta', () => {
+    const m = src.match(/seg\.style\.boxShadow = i < curIdx[\s\S]*?return;\n        \}/);
+    assert.ok(m, 'la rama de modo barra tiene que existir en renderSegments');
+    assert.match(m[0], /classList\.add\('adhd-dormant'\)/,
+      'el tramo posicional activo es dormido igual que el de escalera');
+    assert.match(m[0], /dormantTone\(levelColor\(i, T\)/,
+      'el tono sale de la rareza posicional');
+    assert.match(m[0], /classList\.remove\('adhd-dormant'\)/,
+      'el tramo pasado suelta el dormido: su color pleno es el registro');
+  });
+});
+
+describe('seg-skin-earned-at-close: el cierre es la ignición', () => {
+  const src = publishedSource();
+
+  test('los 3 swaps de congelado sacan el dormido en el mismo swap', () => {
+    // Los swaps que congelan llevan 'adhd-blink-hard' y ...RUNG_CLASSES; el del
+    // tramo activo (applyProjectedRung) no lleva blink-hard y CONSERVA el dormido.
+    const freezes = (src.match(/classList\.remove\([^)]*\)/g) || [])
+      .filter((f) => f.includes('adhd-blink-hard') && f.includes('...RUNG_CLASSES'));
+    assert.ok(freezes.length === 3, 'deben existir 3 swaps de congelado, hay ' + freezes.length);
+    for (const f of freezes) {
+      assert.ok(f.includes("'adhd-dormant'"), 'swap de congelado sin sacar el dormido: ' + f);
+    }
+  });
+
+  test('bajo calma el congelado no crea ornamentos: toda creación va con gate de motion', () => {
+    // spec seg-reward-skin R3: cero NODOS de ornamento bajo reduced motion en el
+    // cierre — no alcanza con esconderlos: no se crean. Las 3 llamadas que
+    // quedan (renderSegments cerrado + los 2 congelados de processCrossings)
+    // van gateadas; la cuarta ocurrencia es la definición.
+    const gated = (src.match(/if \(!motionOff\(\)\) addRungDecorations\(/g) || []).length;
+    const total = (src.match(/addRungDecorations\(/g) || []).length;
+    assert.equal(gated, 3, 'las 3 creaciones de ornamentos van tras el gate de motion');
+    assert.equal(total, 4, 'definición + 3 llamadas gateadas, nada suelto');
   });
 });
 

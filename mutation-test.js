@@ -96,6 +96,24 @@ const MUTATORS = [
   // Sin el fallback, la basura del 1.4 (piso undefined/NaN/editado a mano)
   // deja los efectos en estado indefinido: su propio test lo mata.
   c => firstReplace(c, /return \(v === 3 \|\| v === 4 \|\| v === 5 \|\| v === 6\) \? v : DEFAULTS\.tierMotionFloor;/, 'return v;', 'clampTierMotionFloor: fallback eliminado (identidad)'),
+  // ---------- seg-skin-earned-at-close: el tono dormido y la ignición ----------
+  // Desaturación total: cada peldaño cae a SU gris de misma luminancia — el
+  // orden sobrevive pero el matiz muere (grises sin familia). El test del
+  // patrón de canales + hue lo mata: el matiz es lo que nombra al peldaño.
+  c => firstReplace(c, /const DORMANT_DESAT = 0\.65;/, 'const DORMANT_DESAT = 1;', 'dormantTone: desaturación total (la escalera colapsa a grises sin matiz)'),
+  // Identidad: el tono dormido es el vivo — la racha viva sobre la barra es
+  // justo lo que el change saca del tramo que llena. El test de ≠ lo mata.
+  c => firstReplace(c, /const DORMANT_DESAT = 0\.65;/, 'const DORMANT_DESAT = 0;', 'dormantTone: sin desaturar (identidad, la piel viva en el activo)'),
+  // La resurrección del 6.4: decoraciones otra vez en el tramo activo. El test
+  // estructural de la reversión lo mata (cero addRungDecorations en el activo).
+  c => firstReplace(c, /segEl\.querySelectorAll\('\.adhd-rung-deco'\)\.forEach\(d => d\.remove\(\)\);/, 'addRungDecorations(segEl, projected);', 'el tramo activo decora otra vez (resurrección del 6.4)'),
+  // Kill switch sobreextendido: el display:none alcanza al segmento pelado y
+  // borra la identidad en vez del ornamento. El test del scope lo mata.
+  c => firstReplace(c, /body\.adhd-motion-off \.adhd-rung-deco,/, 'body.adhd-motion-off .adhd-seg,', 'kill switch sobreextendido: borra el segmento entero (identidad)'),
+  // Gate de calma eliminado: el congelado crea ornamentos aunque el nivel pida
+  // calma — la spec exige cero NODOS, no nodos escondidos. El conteo de llamadas
+  // gateadas lo mata.
+  c => firstReplace(c, /if \(!motionOff\(\)\) addRungDecorations\(seg, rarity\);/, 'addRungDecorations(seg, rarity);', 'congelado sin gate: crea ornamentos bajo calma'),
 ];
 
 // ---------- correr los tests contra el SRC actual ----------

@@ -269,6 +269,43 @@
   function waitTick() { return new Promise(function (r) { setTimeout(r, 150); }); }
   function step(ms) { window.__advance(ms); return waitTick(); }
 
+  // seg-skin-earned-at-close: el tramo que llena es dormido; el cierre es la
+  // ignición. Se conduce el progreso REAL de la barra (aria-valuenow dispara el
+  // MutationObserver del script): cruzar el 20% cierra el tramo 0 con una
+  // carrera rapidísima (el reloj virtual casi no avanzó) → congela Super.
+  // El congelado es síncrono en processCrossings; los timers del burst/fx son
+  // aparte y no se esperan (esta ruta no aserta sobre canvas).
+  function segState(idx) {
+    var seg = document.querySelector('.adhd-seg[data-seg="' + idx + '"]');
+    if (!seg) return null;
+    var cs = getComputedStyle(seg);
+    return {
+      dormant: seg.classList.contains('adhd-dormant'),
+      active: seg.classList.contains('adhd-active'),
+      rung: (Array.prototype.filter.call(seg.classList, function (c) {
+        return c.indexOf('adhd-rung-') === 0 && c !== 'adhd-rung-deco';
+      })[0]) || null,
+      bgImage: cs.backgroundImage,
+      deco: seg.querySelectorAll('.adhd-rung-deco').length,
+      toneVar: seg.style.getPropertyValue('--adhd-dormant') || null,
+    };
+  }
+  function __setPct(v) {
+    var bar = document.querySelector('#lesson .bar');
+    if (bar) bar.setAttribute('aria-valuenow', String(v));
+  }
+  function dormantProbe() {
+    return waitTick().then(function () {
+      var earlyActive = segState(0);
+      __setPct(0.21);
+      return waitTick().then(function () {
+        return waitTick().then(function () {
+          return { earlyActive: earlyActive, closed: segState(0), nextActive: segState(1) };
+        });
+      });
+    });
+  }
+
   // fix-crono-contrast: avanza dentro de la vuelta en pasos chicos hasta que el
   // contador entra en urgencia (>80% de la vuelta) y toma esa lectura ya
   // asentada. Tope de 6 pasos: si nunca urgente, cronoUrgent queda false y la
@@ -1014,6 +1051,15 @@
       // por tiempo virtual se comia la fase (los timers de 50 y 400ms llegaban y
       // el de 800 no). La fase se bombea sola con su propio bucle de 1ms.
       navCleansUp();
+      return;
+    }
+
+    // seg-skin-earned-at-close: ruta dedicada (animada y calma) — solo la sonda
+    // del ciclo dormido→ignición. No corre el recorrido de vueltas ni el panel
+    // de efectos: el cruce real dispara burst/fx que estorbarían las fases de
+    // las otras rutas si se mezclaran.
+    if (location.pathname.indexOf('dormant') !== -1) {
+      dormantProbe().then(function (d) { report.dormant = d; finish(); });
       return;
     }
 

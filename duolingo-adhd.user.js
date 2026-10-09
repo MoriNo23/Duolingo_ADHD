@@ -2,7 +2,7 @@
 // @name           Duolingo ADHD — Progress bar milestones (for the easily distracted / bored)
 // @name:es        Duolingo ADHD — Hitos de barra de progreso (para los que se aburren / se distraen)
 // @namespace      https://github.com/MoriNo23/duolingo-adhd
-// @version        2.22.0
+// @version        2.23.0
 // @description    Divide la barra de progreso de la lección en tramos. Modo tiempo: cada tramo arranca en Super y cada vez que el riel se agota baja un peldaño (Super→Madera); el peldaño en que cierres el tramo queda congelado. Cerrá rápido para congelar mejor jerarquía. Recompensas a pantalla completa en peldaños altos (Racha/Diamante/Super), cronómetro Baloo 2, diario local + panel EN/ES. Con sonido: fanfarria por peldaño y recordatorio periódico (Ajustes → Sonido). Mantiene el diseño nativo de Duolingo.
 // @description:en Splits the lesson progress bar into segments. Timer mode: every segment starts at the top tier (Super) and each time the rail runs out it drops one tier (Super→Wood) — the tier you close the segment on gets frozen. Close fast to freeze a better tier. Full-screen reward effects on high tiers (Streak/Diamond/Super), Baloo 2 clock, local journal + EN/ES settings. With sound: a tier fanfare on every segment close plus a periodic reminder (Settings → Sound). Keeps Duolingo's native design.
 // @description:es Divide la barra de progreso de la lección en tramos. Modo tiempo: cada tramo arranca en el nivel Super y va bajando de peldaño (Madera→Super) mientras se quema el presupuesto — cerrá rápido para congelar mejor jerarquía. Efectos de recompensa a pantalla completa en los peldaños altos (Racha/Diamante/Super), partículas, cronómetro Baloo 2, diario local + panel EN/ES. Con sonido: fanfarria por peldaño y recordatorio periódico (Ajustes → Sonido). Mantiene el diseño nativo de Duolingo.
@@ -676,6 +676,41 @@ const CALM_GREYS = { 3: '#565656', 4: '#9e9e9e', 5: '#e2e2e2' };
 function calmGreyFor(rung) {
   return Object.prototype.hasOwnProperty.call(CALM_GREYS, rung) ? CALM_GREYS[rung] : null;
 }
+
+// seg-skin-earned-at-close: el tono dormido del tramo que llena. Desaturacion
+// a LUMINANCIA CONSTANTE — mezcla hacia el gris de la propia luminancia en
+// espacio lineal: Y se preserva exacto (el orden de la escalera sobrevive por
+// construccion), la direccion de croma lineal queda intacta (el matiz no cambia
+// de familia) y solo la saturacion cae. Nunca un gris uniforme: colapsaria la
+// escalera (Plata<->Racha 1.01:1, el par que motion-preference deja registrado).
+// El gris puro entra y sale igual: ya es quieto. levelColor interpola en
+// formato rgb(...) cuando hay mas tramos que rarezas, asi que tambien entra.
+const DORMANT_DESAT = 0.65; // cuanto se mezcla hacia el gris: croma *= 0.35
+const LEGENDARY_ANCHOR = '#7c3aed'; // ancla violeta del gradiente epico
+function dormantTone(hex) {
+  let r, g, b;
+  if (typeof hex === 'string' && /^#[0-9a-fA-F]{6}$/.test(hex)) {
+    [r, g, b] = hexToRgb(hex);
+  } else if (typeof hex === 'string') {
+    const m = hex.match(/^rgb\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)$/);
+    if (!m) return null;
+    r = +m[1]; g = +m[2]; b = +m[3];
+    if (r > 255 || g > 255 || b > 255) return null;
+  } else {
+    return null;
+  }
+  if (r === g && g === b) {
+    return '#' + [r, g, b].map((n) => n.toString(16).padStart(2, '0')).join('');
+  }
+  const lin = (c) => (c / 255 <= 0.03928 ? c / 255 / 12.92 : Math.pow((c / 255 + 0.055) / 1.055, 2.4));
+  const Y = 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+  const mix = (c) => {
+    const m = (1 - DORMANT_DESAT) * lin(c) + DORMANT_DESAT * Y;
+    const s = m <= 0.0031308 ? m * 12.92 : 1.055 * Math.pow(m, 1 / 2.4) - 0.055;
+    return Math.max(0, Math.min(255, Math.round(s * 255)));
+  };
+  return '#' + [mix(r), mix(g), mix(b)].map((n) => n.toString(16).padStart(2, '0')).join('');
+}
 // Escala un gris por factor con clamp. Basura (hex invalido, factor no
 // finito) -> null: nunca lanza. Solo pisa el eje neutro: r === g === b
 // siempre, asi el que lo usa no puede introducir tono por accidente.
@@ -722,6 +757,8 @@ const CORE = {
   cronoTextColor, hexLuminance,
   // calm-canvas-grayscale: rampa de grises de la presentacion calmada
   calmGreyFor, shadeGrey,
+  // seg-skin-earned-at-close: el tono dormido del tramo que llena
+  dormantTone, LEGENDARY_ANCHOR, DORMANT_DESAT,
   // lesson-only-overlay + lesson-bar-container-anchor: detection
   isLessonScreen, isLessonBar, findLessonBarByAnchor, findBarBySignature,
 };
@@ -1918,13 +1955,9 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
         position:absolute; top:0; right:0; width:3px; height:100%; border-radius:2px;
         background:#fff; box-shadow:0 0 8px 2px rgba(255,255,255,.85);
       }
-      /* sliding shine: SOLO tramo activo, con descanso (off en racha/super) */
-      .adhd-shine-wrap { position:absolute; inset:0; overflow:hidden; border-radius:9999px; pointer-events:none; }
-      .adhd-shine {
-        position:absolute; top:0; bottom:0; width:34%;
-        background: linear-gradient(105deg, transparent, rgba(255,255,255,.7), transparent);
-        animation: adhd-sweep2 2400ms cubic-bezier(.4,0,.2,1) infinite;
-      }
+      /* seg-skin-earned-at-close: el sliding shine muere con el tramo dormido —
+         era ambientación pura del activo. Sus reglas se retiran; el keyframe
+         adhd-sweep2 queda (lo usan los sweeps de ::before de peldaño bajo). */
       @keyframes adhd-sweep2 { 0% { transform: translateX(-140%); } 100% { transform: translateX(340%); } }
 
       /* ===== redesign-decay-timeline: riel continuo de depleción =====
@@ -2061,18 +2094,43 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
         100% { box-shadow:0 0 28px 12px rgba(167,139,250,0); }
       }
 
+      /* ===== seg-skin-earned-at-close: el tramo dormido =====
+         Mientras un tramo se LLENA es dormido: tono apagado plano (el matiz
+         nombra al peldaño; la croma no), cero loops ambientales, cero
+         ornamentos. El fondo plano deja que la caída de peldaño transicione
+         nativa — el crossfade de pieles de tramo-fx-round2 ya no corre en el
+         activo (su span sigue existiendo para otros usos y acá también va
+         dormido). El CIERRE quita la clase en el mismo swap que congela: la
+         piel viva ES la recompensa. La opacidad del llenado no se toca: es
+         progreso, no decoración. */
+      .adhd-dormant {
+        background: var(--adhd-dormant, #8a8f98) !important;
+        transition: background-color .32s ease;
+      }
+      .adhd-seg.adhd-dormant::before,
+      .adhd-seg.adhd-dormant::after { content: none !important; }
+      .adhd-seg.adhd-dormant .adhd-sweep,
+      .adhd-seg.adhd-dormant .adhd-flash,
+      .adhd-seg.adhd-dormant .adhd-rung-deco { display: none !important; }
+
       /* ===== animations-panel-setting: kill switch (la info nunca depende de la animación) =====
          Antes era una regla @media (prefers-reduced-motion: reduce). Ahora es
          la clase body.adhd-motion-off, que JS alterna según el nivel del usuario
          y la preferencia del sistema (ver aplicarMotion). Motivo: una sola
          fuente de verdad, así el CSS y el JS no pueden discrepar.
 
-         ALCANCE: SOLO EFECTOS. Las pieles de los peldaños (.adhd-rung-racha /
-         -diamante / -super con su .adhd-ember / .adhd-sparkle / .adhd-shine, y las
-         texturas ::before de los tramos) quedan FUERA a propósito: son material,
-         no animación, y reward-fx solo exige que los EFECTOS tengan variante
-         calmada. Apagarlas sacaba la identidad visual del peldaño ganado, y el
-         usuario no tenía forma de recuperarlas desde el script.
+         ALCANCE (reescrito por seg-skin-earned-at-close): EFECTOS y MOVIMIENTO
+         de piel. La IDENTIDAD es material y sobrevive como frame estático: el
+         color, la composición del degradado y las texturas de los peldaños
+         congelados no se tocan. Lo que muere bajo calma: los efectos y su
+         decoración de apoyo, y desde este change el MOVIMIENTO de las pieles
+         — el flicker de racha, el degradado animado de diamante/super y el
+         glow del legendario colapsan a frame estático, y los ornamentos
+         (embers/sparkles, sweep y flash del legendario, sus franjas blancas)
+         no se renderizan. El split explícito: movimiento y ornamento son
+         motion; color, degradado y textura son material. Antes las pieles
+         enteras quedaban fuera (“material, no animación”) y animaban sus
+         degradados para siempre incluso con motion off.
 
          El barrido de la cabeza del riel (.adhd-rail-head::after) sigue adentro:
          es animación, y era su única señal de vida. El costo perceptual de
@@ -2089,9 +2147,20 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
         body.adhd-motion-off .adhd-part2,
         body.adhd-motion-off .adhd-ring,
         body.adhd-motion-off .adhd-seg.adhd-blink,
-        body.adhd-motion-off .adhd-seg.adhd-legendary {
+        body.adhd-motion-off .adhd-seg.adhd-legendary,
+        body.adhd-motion-off .adhd-rung-racha,
+        body.adhd-motion-off .adhd-rung-diamante,
+        body.adhd-motion-off .adhd-rung-super {
           animation-duration: 1ms !important; animation-iteration-count: 1 !important; animation-delay: 0ms !important;
         }
+        /* seg-skin-earned-at-close: los ornamentos no se RENDERIZAN bajo calma
+           (en el cierre JS ya no los crea — esto cubre el cambio de nivel en
+           caliente sobre tramos congelados con motion permitido). */
+        body.adhd-motion-off .adhd-rung-deco,
+        body.adhd-motion-off .adhd-seg.adhd-legendary .adhd-sweep,
+        body.adhd-motion-off .adhd-seg.adhd-legendary .adhd-flash { display:none !important; }
+        body.adhd-motion-off .adhd-seg.adhd-legendary::before,
+        body.adhd-motion-off .adhd-seg.adhd-legendary::after { display:none !important; }
         body.adhd-motion-off .adhd-part2,
         body.adhd-motion-off .adhd-ring { display:none; }
     `);
@@ -2996,36 +3065,31 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
     // Skin del tramo activo = rung proyectado. Caída de peldaño → flash de pérdida.
     const RUNG_CLASSES = RUNGS.map(r => 'adhd-rung-' + r.id);
 
-    // tramo-fx-round2 (D2): CSS no interpola background-image — al cambiar de
-    // peldaño, el skin ANTERIOR vive 320ms encima y fadea (degradado real, no
-    // swap instantáneo). Máx 1 vivo, mismo patrón idempotente del flash.
-    function crossFadeRung(segEl, prevCls) {
-      if (segEl.querySelector('.adhd-rung-prev')) return;
-      const s = document.createElement('span');
-      s.className = 'adhd-rung-prev ' + prevCls;
-      s.setAttribute('aria-hidden', 'true');
-      segEl.appendChild(s);
-      setTimeout(() => s.remove(), 340);
-    }
-
     function applyProjectedRung(segEl, projected, frac) {
       const cls = rungClass(projected);
       if (cls && !segEl.classList.contains(cls)) {
-        const prevCls = lastProjectedRung !== null ? rungClass(lastProjectedRung) : null;
         segEl.classList.remove('adhd-rarity-verde', 'adhd-blink', ...RUNG_CLASSES);
         segEl.classList.add(cls);
-        if (prevCls && prevCls !== cls) crossFadeRung(segEl, prevCls);
         // Bajar de peldaño dentro del mismo tramo (la vuelta se recargó) es un
-        // escalón, no una pérdida: solo el crossfade de skin lo marca.
+        // escalón, no una pérdida: el flash rojo lo marca y el tono dormido
+        // transiciona nativo (el crossfade de pieles de tramo-fx-round2 ya no
+        // corre acá: el activo es plano, no degradado).
         if (lastProjectedRung !== null && projected < lastProjectedRung) {
           flashLoss(segEl);
         }
         lastProjectedRung = projected;
-        // 6.4 feedback: las decoraciones vivas (embers/sparkles) también viven en el
-        // tramo ACTIVO, no solo en el congelado — si no, el tramo que más tiempo se
-        // ve es el más quieto. Se refrescan por peldaño en cada cambio de clase.
+        // seg-skin-earned-at-close (reversión del 6.4): el tramo activo es a
+        // propósito lo más quieto de la barra — el silencio mientras llena es
+        // lo que hace que el cierre se lea como ignición. Decoraciones heredadas
+        // fuera: el tono dormido nombra al peldaño sin encenderlo.
         segEl.querySelectorAll('.adhd-rung-deco').forEach(d => d.remove());
-        addRungDecorations(segEl, projected);
+      }
+      // seg-skin-earned-at-close: el tramo que llena es dormido — el matiz
+      // apagado del peldaño proyectado, plano y quieto hasta el cierre.
+      segEl.classList.add('adhd-dormant');
+      const tone = dormantTone(RUNGS[projected].from);
+      if (tone && segEl.style.getPropertyValue('--adhd-dormant') !== tone) {
+        segEl.style.setProperty('--adhd-dormant', tone);
       }
       // Urgencia por presupuesto quemado (no por avance visual): frac > 0.8
       segEl.classList.toggle('adhd-blink-hard', frac > 0.8 && frac < 1);
@@ -3069,8 +3133,10 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
       }
     }
 
-    // Efectos del tramo ACTIVO: leading edge siempre; sliding shine salvo racha/super.
-    function ensureActiveFx(segEl, projected) {
+    // Efectos del tramo ACTIVO: leading edge siempre (el frente del llenado).
+    // seg-skin-earned-at-close: el sliding shine muere — ambientación pura en
+    // un tramo que ahora es dormido por diseño.
+    function ensureActiveFx(segEl) {
       // leading edge: sólo si hay llenado visible y no existe
       if (!segEl.querySelector('.adhd-edge')) {
         const edge = document.createElement('span');
@@ -3080,21 +3146,6 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
       }
       const edge = segEl.querySelector('.adhd-edge');
       if (edge) edge.style.opacity = (parseFloat(segEl.style.width) > 1) ? '1' : '0';
-
-      // sliding shine: SOLO tramo activo, off en racha/super (compite con flicker/gradiente)
-      const wantShine = projected !== 3 && projected !== 5;
-      if (wantShine && !segEl.querySelector('.adhd-shine-wrap')) {
-        const wrap = document.createElement('span');
-        wrap.className = 'adhd-shine-wrap';
-        wrap.setAttribute('aria-hidden', 'true');
-        const s = document.createElement('i');
-        s.className = 'adhd-shine';
-        wrap.appendChild(s);
-        segEl.appendChild(wrap);
-      } else if (!wantShine) {
-        const wrap = segEl.querySelector('.adhd-shine-wrap');
-        if (wrap) wrap.remove();
-      }
     }
 
     function clearActiveFx(segEl) {
@@ -3191,9 +3242,18 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
         // vida (D1) y los sweeps viven SOLO acá; el registro congelado no parpadea.
         seg.classList.toggle('adhd-active', i === curIdx);
 
-        // Tramo legendario (último, sin timer) mantiene su animación
+        // seg-skin-earned-at-close: el legendario (solo existe en modo barra)
+        // también duerme mientras llena — su gradiente épico, glow y sparkles
+        // se encienden cuando cierra (la barra al 100%: curIdx pasa a T o el
+        // tramo queda lleno). El CSS anima solo lo que la clase dormida no calla.
         if (seg.classList.contains('adhd-legendary')) {
-          // Nada que hacer, el CSS anima solo
+          const full = segProgress(pct, i, T) >= segLength(T) - 1e-9;
+          const dormLegacy = i === curIdx && !full;
+          seg.classList.toggle('adhd-dormant', dormLegacy);
+          if (dormLegacy) {
+            const tone = dormantTone(LEGENDARY_ANCHOR);
+            if (tone) seg.style.setProperty('--adhd-dormant', tone);
+          }
           return;
         }
 
@@ -3201,9 +3261,15 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
         if (!cfg.timerMode) {
           seg.style.boxShadow = i < curIdx ? '0 0 6px rgba(255,255,255,.35)' : 'none';
           if (i === curIdx) {
+            // seg-skin-earned-at-close: el activo posicional duerme igual — el
+            // matiz apagado de su rareza hasta que la frontera lo pasa.
+            seg.classList.add('adhd-dormant');
+            const tone = dormantTone(levelColor(i, T) || LEGENDARY_ANCHOR);
+            if (tone) seg.style.setProperty('--adhd-dormant', tone);
             const done = Math.min(1, segDone / segLen);
             seg.style.opacity = String(0.25 + 0.75 * done);
           } else {
+            seg.classList.remove('adhd-dormant');
             seg.style.opacity = '1';
           }
           return;
@@ -3215,11 +3281,16 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
         if (rarity !== undefined) {
           // Tramo cerrado: congela el rung ganado (la barra es un registro).
           // Swap quirúrgico — nunca className full-replace (timer-mode-ux 1.1)
+          // seg-skin-earned-at-close: el MISMO swap que congela es la ignición —
+          // el dormido se va con la clase y la piel viva entra, sin frame de
+          // residuo dormido sobre un tramo cerrado.
           const frozenCls = rungClass(rarity);
           if (!seg.classList.contains(frozenCls)) {
-            seg.classList.remove('adhd-blink', 'adhd-blink-hard', 'adhd-rarity-verde', ...RUNG_CLASSES);
+            seg.classList.remove('adhd-blink', 'adhd-blink-hard', 'adhd-rarity-verde', 'adhd-dormant', ...RUNG_CLASSES);
             seg.classList.add(frozenCls);
-            addRungDecorations(seg, rarity);
+            // Bajo calma no se crean ornamentos (spec seg-reward-skin R3): el
+            // kill switch apaga los que hubiera dejado un nivel anterior.
+            if (!motionOff()) addRungDecorations(seg, rarity);
           }
           seg.style.opacity = '1';
           seg.style.boxShadow = '0 0 6px rgba(255,255,255,.35)';
@@ -3233,7 +3304,7 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
             const L = currentLadder(Date.now() - raceStartTime);
             if (L) {
               applyProjectedRung(seg, L.tier, L.frac);
-              ensureActiveFx(seg, L.tier);
+              ensureActiveFx(seg);
             }
           } else {
             seg.classList.remove('adhd-blink', 'adhd-blink-hard');
@@ -3276,11 +3347,11 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
               const segEl = overlay.querySelector(`.adhd-seg[data-seg="${tramoIdx}"]`);
               if (segEl) {
                 const frozenCls = rungClass(result.rung);
-                segEl.classList.remove('adhd-active', 'adhd-blink', 'adhd-blink-hard', 'adhd-rarity-verde', ...RUNG_CLASSES);
+                segEl.classList.remove('adhd-active', 'adhd-blink', 'adhd-blink-hard', 'adhd-rarity-verde', 'adhd-dormant', ...RUNG_CLASSES);
                 segEl.classList.add(frozenCls);
                 segEl.style.opacity = '1';
                 clearActiveFx(segEl);
-                addRungDecorations(segEl, result.rung);
+                if (!motionOff()) addRungDecorations(segEl, result.rung);
               }
 
               // Partículas escaladas + reward fx: siempre hay peldaño (el piso es
@@ -3340,11 +3411,11 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
             const lastSegEl = overlay.querySelector(`.adhd-seg[data-seg="${lastSegIdx}"]`);
             if (lastSegEl) {
               const frozenCls = rungClass(result.rung);
-              lastSegEl.classList.remove('adhd-active', 'adhd-blink', 'adhd-blink-hard', 'adhd-rarity-verde', ...RUNG_CLASSES);
+              lastSegEl.classList.remove('adhd-active', 'adhd-blink', 'adhd-blink-hard', 'adhd-rarity-verde', 'adhd-dormant', ...RUNG_CLASSES);
               lastSegEl.classList.add(frozenCls);
               lastSegEl.style.opacity = '1';
               clearActiveFx(lastSegEl);
-              addRungDecorations(lastSegEl, result.rung);
+              if (!motionOff()) addRungDecorations(lastSegEl, result.rung);
             }
             {
               burstRung(result.rung, cx, result.rung === 5); // Super cierra con doble oleada
