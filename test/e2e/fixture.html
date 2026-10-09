@@ -46,6 +46,16 @@
   };
   window.GM_getValue = function (k, d) { return (k in store) ? store[k] : d; };
   window.GM_setValue = function (k, v) { store[k] = v; };
+  // reminder-desktop-notification: stub del canal de escritorio. El runner no
+  // tiene daemon de notificaciones: se registra cada intento (detalles
+  // completos) y se simula el caso NO ENTREGADO (error de entrega) — es la
+  // rama automatizable del panel que falla visible (la confirmación de que
+  // GNOME/Windows bloquean de verdad es del guion de campo).
+  window.__notifCalls = [];
+  window.GM_notification = function (details) {
+    window.__notifCalls.push(details);
+    throw new Error('e2e: notificación no entregada (sin daemon)');
+  };
   window.GM_info = { script: { version: 'e2e' } };
   window.GM_registerMenuCommand = function () {};
 
@@ -70,7 +80,14 @@
   window.__motionSeeded = seed.indexOf('calm-system') !== -1 ? 'system'
     : seed.indexOf('calm-never') !== -1 ? 'never'
     : seed.indexOf('not-a-lesson') !== -1 ? 'never' : 'always';
-  store.adhd_config = { lang: 'es', timerMode: true, timerMinutes: 0, timerSeconds: __GOAL__, motionLevel: window.__motionSeeded };
+  // tier-motion-per-seg: el piso por peldaño sembrado por ruta. 'tier5' ->
+  // solo Super celebra con canvas (racha y diamante quedan bajo el piso).
+  // calm-never SIEMBRA piso 5 a propósito: la ruta calmada tiene que mostrar
+  // los tres efectos igual — el piso es observablemente inerte bajo calma
+  // (spec motion-preference: "the change is observably inert").
+  window.__tierFloorSeeded = seed.indexOf('tier5') !== -1 ? 5
+    : seed.indexOf('calm-never') !== -1 ? 5 : 3;
+  store.adhd_config = { lang: 'es', timerMode: true, timerMinutes: 0, timerSeconds: __GOAL__, motionLevel: window.__motionSeeded, tierMotionFloor: window.__tierFloorSeeded };
 
   // Reloj controlable: __t se avanza desde el reporte.
   var realNow = Date.now;
@@ -182,13 +199,6 @@
 /*__SCRIPT__*/
 </script>
 
-<!-- add-field-qa-loop: el companion de QA, inyectado DESPUÉS del script
-     publicado. Si todavía no existe, el slot queda vacío y el chequeo del
-     companion reporta present=false (RED hasta que se cree). -->
-<script>
-/*__QA_SCRIPT__*/
-</script>
-
 <script>
 // ---- reporte: se escribe en el <pre> y el runner lo parsea del DOM volcado ----
 (function () {
@@ -238,6 +248,7 @@
       // control del panel se prueba en el core contra el fuente publicado; aca
       // se prueba el efecto real sobre <body>, que es lo que se ve.
       motionSeeded: window.__motionSeeded,
+      tierFloorSeeded: window.__tierFloorSeeded,
       motionOffClass: document.body.classList.contains('adhd-motion-off'),
       rmReduce: window.__rmReduce,
       rmReduceReal: window.__rmReduceReal,
@@ -257,6 +268,43 @@
   // recorrido es async y cada muestra espera un tick.
   function waitTick() { return new Promise(function (r) { setTimeout(r, 150); }); }
   function step(ms) { window.__advance(ms); return waitTick(); }
+
+  // seg-skin-earned-at-close: el tramo que llena es dormido; el cierre es la
+  // ignición. Se conduce el progreso REAL de la barra (aria-valuenow dispara el
+  // MutationObserver del script): cruzar el 20% cierra el tramo 0 con una
+  // carrera rapidísima (el reloj virtual casi no avanzó) → congela Super.
+  // El congelado es síncrono en processCrossings; los timers del burst/fx son
+  // aparte y no se esperan (esta ruta no aserta sobre canvas).
+  function segState(idx) {
+    var seg = document.querySelector('.adhd-seg[data-seg="' + idx + '"]');
+    if (!seg) return null;
+    var cs = getComputedStyle(seg);
+    return {
+      dormant: seg.classList.contains('adhd-dormant'),
+      active: seg.classList.contains('adhd-active'),
+      rung: (Array.prototype.filter.call(seg.classList, function (c) {
+        return c.indexOf('adhd-rung-') === 0 && c !== 'adhd-rung-deco';
+      })[0]) || null,
+      bgImage: cs.backgroundImage,
+      deco: seg.querySelectorAll('.adhd-rung-deco').length,
+      toneVar: seg.style.getPropertyValue('--adhd-dormant') || null,
+    };
+  }
+  function __setPct(v) {
+    var bar = document.querySelector('#lesson .bar');
+    if (bar) bar.setAttribute('aria-valuenow', String(v));
+  }
+  function dormantProbe() {
+    return waitTick().then(function () {
+      var earlyActive = segState(0);
+      __setPct(0.21);
+      return waitTick().then(function () {
+        return waitTick().then(function () {
+          return { earlyActive: earlyActive, closed: segState(0), nextActive: segState(1) };
+        });
+      });
+    });
+  }
 
   // fix-crono-contrast: avanza dentro de la vuelta en pasos chicos hasta que el
   // contador entra en urgencia (>80% de la vuelta) y toma esa lectura ya
@@ -366,6 +414,34 @@
     return { bits: bits, on: on, comps: countComponents(mask), ink: on / (PROBE_W * PROBE_H) };
   }
 
+  // calm-canvas-grayscale: hermana de maskOf para el tono. Sobre los pixeles
+  // con tinta (mismo corte relativo), que fraccion es neutra (canales iguales
+  // con tolerancia de antialiasing) y su luminancia media ponderada por alpha.
+  // Mezclar dos neutros sigue siendo neutro, asi que un efecto calmado bien
+  // griseado da ~1.0 aunque haya bordes suavizados; uno a color, no.
+  function toneOf(canvas) {
+    pctx.clearRect(0, 0, PROBE_W, PROBE_H);
+    pctx.drawImage(canvas, 0, 0, PROBE_W, PROBE_H);
+    var d = pctx.getImageData(0, 0, PROBE_W, PROBE_H).data;
+    var max = 0, i;
+    for (i = 3; i < d.length; i += 4) if (d[i] > max) max = d[i];
+    if (max < 8) return { n: 0, neutralFrac: null, lumMean: null };
+    var cut = max * 0.35, n = 0, neutral = 0, lumAcc = 0, alphaAcc = 0;
+    for (i = 0; i < d.length; i += 4) {
+      var a = d[i + 3];
+      if (a < cut) continue;
+      n++;
+      var r = d[i], g = d[i + 1], b = d[i + 2];
+      var spread = Math.max(r, g, b) - Math.min(r, g, b);
+      if (spread <= 6) neutral++;
+      var w = a / 255;
+      lumAcc += (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255 * w;
+      alphaAcc += w;
+    }
+    if (!n) return { n: 0, neutralFrac: null, lumMean: null };
+    return { n: n, neutralFrac: neutral / n, lumMean: alphaAcc > 0 ? lumAcc / alphaAcc : null };
+  }
+
   // Fraccion de pixeles con alpha arriba del umbral relativo. Version liviana de
   // maskOf (sin bitset ni componentes) para los bucles que solo preguntan
   // "¿dibujo algo?".
@@ -422,10 +498,13 @@
       var rng = document.querySelector('#adhd-reminder-secs');
       var val = document.querySelector('#adhd-reminder-secs-val');
       var btn = document.querySelector('#adhd-test-sound');
+      var notif = document.querySelector('#adhd-reminder-notif');
+      var notifStatus = document.querySelector('#adhd-reminder-notif-status');
       var out = {
-        present: !!(cues && rem && rng && btn && val),
+        present: !!(cues && rem && rng && btn && val && notif && notifStatus),
         cuesChecked: cues ? cues.checked : null,
         reminderChecked: rem ? rem.checked : null,
+        notifChecked: notif ? notif.checked : null,
         range: rng ? rng.value : null,
         rangeText: val ? val.textContent : null,
         rangeMin: rng ? rng.min : null,
@@ -449,6 +528,17 @@
         rem.checked = true;
         rem.dispatchEvent(new Event('change', { bubbles: true }));
         out.storedReminderOn = window.GM_getValue('adhd_config', {}).reminderEnabled;
+      }
+
+      // reminder-desktop-notification: el toggle del canal de escritorio
+      // persiste igual que los demás (setCfg), sin reiniciar nada.
+      if (notif) {
+        notif.checked = false;
+        notif.dispatchEvent(new Event('change', { bubbles: true }));
+        out.storedNotifOff = window.GM_getValue('adhd_config', {}).reminderNotifEnabled;
+        notif.checked = true;
+        notif.dispatchEvent(new Event('change', { bubbles: true }));
+        out.storedNotifOn = window.GM_getValue('adhd_config', {}).reminderNotifEnabled;
       }
 
       // El boton de prueba suena al toque: no tiene que romper nada (el audio
@@ -573,7 +663,13 @@
       out.c1 = c1;
       setHidden(true);
       window.__advance(50000);
-      return beat(2).then(function () { out.whileHidden = cueUnits() - c1; });
+      return beat(2).then(function () {
+        out.whileHidden = cueUnits() - c1;
+        // reminder-desktop-notification: oculto+vencido con la notificación
+        // activada escala al canal de escritorio — el stub registra cada
+        // intento. Sin sonido igual (los cues de arriba no se movieron).
+        out.notifAttempts = (window.__notifCalls || []).length;
+      });
     }).then(function () {
       // Vuelve y se pone a trabajar al instante: el pendiente espera.
       setHidden(false);
@@ -586,53 +682,24 @@
       return beat(2).then(function () {
         out.idleAfterReturn = cueUnits() - out.c1 - out.backToWork;
         try { delete document.hidden; } catch (e) {}   // devuelve el getter real
-        report.reminderIdle = out;
       });
+    }).then(function () {
+      // reminder-desktop-notification: fallar visible. Todos los intentos del
+      // canal de escritorio quedaron sin entregar (stub que revienta): el
+      // panel tiene que decirlo en vez de mostrar el toggle como si todo
+      // anduviera. Se lee con el panel abierto y se deja como se encontró.
+      var gear = document.querySelector('.adhd-btn');
+      var abierto = !!document.querySelector('#adhd-test-sound');
+      if (!abierto && gear) gear.click();
+      var st = document.querySelector('#adhd-reminder-notif-status');
+      out.notifStatusShown = st ? (st.style.display !== 'none' && st.textContent.length > 0) : false;
+      out.notifStatusText = st ? st.textContent : null;
+      if (!abierto && gear) gear.click();
+      report.reminderIdle = out;
     });
   }
 
   // ---------------------------------------------------------------------
-  // add-field-qa-loop: el companion de QA captura el diagnóstico de campo.
-  // Se inyecta DESPUÉS del script publicado (slot propio del companion), su
-  // botón es propio (adhd-qa-*) y su bloque reporta lo observable: errores de
-  // la página, artefactos DOM del script y motion. La versión/config exacta del
-  // script NO se adivina (spec field-qa). El error sonda se filtra de
-  // __errors: es del arnés, no del script.
-  // ---------------------------------------------------------------------
-  function qaCompanionCheck() {
-    var out = { present: !!document.querySelector('#adhd-qa-btn') };
-    var btn = document.querySelector('#adhd-qa-copy');
-    if (out.present && btn) {
-      var capturado = null;
-      var clipReal = navigator.clipboard && navigator.clipboard.writeText;
-      try {
-        if (navigator.clipboard) {
-          navigator.clipboard.writeText = function (t) { capturado = t; return Promise.resolve(); };
-        }
-      } catch (e) { /* headless sin clipboard API: queda el fallback del companion */ }
-      btn.click();
-      out.copioAlgo = typeof capturado === 'string' && capturado.length > 0;
-      out.tieneErrores = /errores \(\d+\)/.test(capturado || '');
-      out.tienePath = (capturado || '').indexOf(location.pathname) !== -1;
-      out.tieneMotion = /motion: (calma|animado)/.test(capturado || '');
-      out.tieneArtefactos = /overlay: (presente|ausente)/.test(capturado || '')
-        && /riel: (presente|ausente)/.test(capturado || '');
-      out.noAdivinaVersion = !/version:/.test(capturado || '');
-      // Sonda: el ring buffer del companion debe ver el error de la página.
-      window.dispatchEvent(new ErrorEvent('error', {
-        message: 'qa-diag-inyectado', error: new Error('qa-diag-inyectado'),
-      }));
-      capturado = null;
-      btn.click();
-      out.capturaElError = (capturado || '').indexOf('qa-diag-inyectado') !== -1;
-      if (clipReal) { try { navigator.clipboard.writeText = clipReal; } catch (e) {} }
-      window.__errors = window.__errors.filter(function (m) {
-        return String(m).indexOf('qa-diag-inyectado') === -1;
-      });
-    }
-    report.qa = out;
-  }
-
   function staleFrameCheck() {
     var out = [];
     var names = [['racha', window.StreakFlames], ['diamante', window.CrystalReward], ['super', window.DuoReward]];
@@ -754,6 +821,10 @@
             s.last = window.__perf;
             s.bits.push(m.bits);
             s.series.push([m.comps, m.ink, window.__perf]);
+            // calm-canvas-grayscale: el tono viaja alineado con la serie, para
+            // promediarlo en la misma ventana de meseta que la forma.
+            if (!s.tones) s.tones = [];
+            s.tones.push(toneOf(el));
             if (m.comps > s.compsMax) s.compsMax = m.comps;
             if (m.ink > s.inkMax) s.inkMax = m.ink;
             // El re-render entra con el primer efecto ya visible: ahi se prueba
@@ -822,6 +893,21 @@
             var area2 = Math.max(s.series[postFirst][1], s.series[postLast][1]) * (PROBE_W * PROBE_H);
             postChange = area2 > 0 ? diff2 / area2 : null;
           }
+          // calm-canvas-grayscale: tono promedio en la ventana de meseta (la
+          // misma que shapeChange). greyFrac dice si es gris; greyLum dice
+          // CUAL gris: lo que distingue un peldano de otro sin mirar el tono.
+          var greyFrac = null, greyLum = null;
+          if (s.tones && first >= 0 && last > first) {
+            var tn = 0, tf = 0, tl = 0, tlw = 0;
+            for (var q = first; q <= last; q++) {
+              var tt = s.tones[q];
+              if (!tt || tt.n === 0 || tt.neutralFrac === null) continue;
+              tn++; tf += tt.neutralFrac;
+              if (tt.lumMean !== null) { tl += tt.lumMean; tlw++; }
+            }
+            if (tn > 0) greyFrac = tf / tn;
+            if (tlw > 0) greyLum = tl / tlw;
+          }
           return {
             tier: tier,
             visibleMs: span,
@@ -833,6 +919,8 @@
             ink: s.inkMax,
             afterSwapFrames: postFrames,
             afterSwapChange: postChange,
+            greyFrac: greyFrac,
+            greyLum: greyLum,
           };
         });
         resolve();
@@ -952,8 +1040,6 @@
     // siguientes, que lo abren solas con gear.click().
     soundPanelCheck();
     finish();
-    qaCompanionCheck();
-    finish();
     if (!report.rail) return;                   // path que no es leccion
 
     // fix-reward-fx-killed-by-transient-bar-loss: la ruta de fin de vida real
@@ -965,6 +1051,15 @@
       // por tiempo virtual se comia la fase (los timers de 50 y 400ms llegaban y
       // el de 800 no). La fase se bombea sola con su propio bucle de 1ms.
       navCleansUp();
+      return;
+    }
+
+    // seg-skin-earned-at-close: ruta dedicada (animada y calma) — solo la sonda
+    // del ciclo dormido→ignición. No corre el recorrido de vueltas ni el panel
+    // de efectos: el cruce real dispara burst/fx que estorbarían las fases de
+    // las otras rutas si se mezclaran.
+    if (location.pathname.indexOf('dormant') !== -1) {
+      dormantProbe().then(function (d) { report.dormant = d; finish(); });
       return;
     }
 

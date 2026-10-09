@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
 <meta charset="utf-8">
-<title>Guion de QA de campo — plantilla</title>
+<title>QA de campo — calm-canvas-grayscale (2.20.0)</title>
 <style>
   :root { color-scheme: light dark; }
   body { font: 15px/1.5 system-ui, sans-serif; margin: 0 auto; max-width: 720px; padding: 24px 16px 80px; }
@@ -29,7 +29,7 @@
   .guion-pista { color: #999; font-size: 12px; margin: 2px 0 0; }
 </style>
 </head>
-<body data-key="plantilla">
+<body data-key="calm-canvas-grayscale">
 
 <header>
   <h1>Guion de QA de campo</h1>
@@ -43,9 +43,9 @@
 <section id="guion-meta-sec">
   <h2>Datos del guion</h2>
   <div id="guion-meta">
-    <label>change <input id="guion-change" placeholder="nombre-del-change"></label>
-    <label>versión <input id="guion-version" placeholder="x.y.z"></label>
-    <label>fecha <input id="guion-fecha" placeholder="2026-10-06"></label>
+    <label>change <input id="guion-change" value="calm-canvas-grayscale"></label>
+    <label>versión <input id="guion-version" value="2.20.0"></label>
+    <label>fecha <input id="guion-fecha" value="2026-10-08"></label>
     <label><input type="checkbox" id="guion-salto-general"> Salto general: no hago esta ronda de QA
       <textarea id="guion-salto-motivo" class="guion-nota" placeholder="Motivo del salto (queda en el reporte)"></textarea>
     </label>
@@ -55,22 +55,46 @@
 <section id="guion-cambios-sec">
   <span class="guion-titulo guion-titulo">Sección por change</span>
   <h2 class="guion-titulo-h">Preguntas del change</h2>
-  <p class="guion-pista">AL GENERAR UN GUION: reemplazá estas dos preguntas de ejemplo por una pregunta
-     por scenario del change (data-q propio, texto = paso concreto en el sitio real). La maquinaria no se toca.</p>
+  <p class="guion-pista">Preguntas de ESTE change (calm = reduced-motion activo, o Animaciones en Nunca).
+     En evidencia: dump del probe (qa/out/dump-live.json) o lo que viste.</p>
   <ol id="guion-cambios">
-    <li class="guion-q" data-q="ejemplo-1">
-      <p class="guion-pregunta">(Ejemplo, reemplazar) Al hacer X en una lección, pasa Y</p>
-      <label><input type="radio" name="q-ejemplo-1" value="OK"> OK</label>
-      <label><input type="radio" name="q-ejemplo-1" value="FALLA"> FALLA</label>
-      <label><input type="radio" name="q-ejemplo-1" value="SALTO"> Salto</label>
+    <li class="guion-q" data-q="calm-super-vs-madera">
+      <p class="guion-pregunta">En calma: cerrá un tramo en Super y otro en Madera — ¿el cierre en Super se distingue del de Madera? (Super trae el efecto gris con el Duo; Madera solo tiene el burst CSS)</p>
+      <label><input type="radio" name="q-calm-super-vs-madera" value="OK"> OK</label>
+      <label><input type="radio" name="q-calm-super-vs-madera" value="FALLA"> FALLA</label>
+      <label><input type="radio" name="q-calm-super-vs-madera" value="SALTO"> Salto</label>
       <textarea class="guion-nota" placeholder="Qué pasó"></textarea>
       <textarea class="guion-evidencia" placeholder="Dump del probe (qa/out/dump-live.json) o pasos"></textarea>
     </li>
-    <li class="guion-q" data-q="ejemplo-2">
-      <p class="guion-pregunta">(Ejemplo, reemplazar) El panel sigue abriendo y cerrando igual</p>
-      <label><input type="radio" name="q-ejemplo-2" value="OK"> OK</label>
-      <label><input type="radio" name="q-ejemplo-2" value="FALLA"> FALLA</label>
-      <label><input type="radio" name="q-ejemplo-2" value="SALTO"> Salto</label>
+    <li class="guion-q" data-q="calm-racha-vs-diamante">
+      <p class="guion-pregunta">En calma: cerrá un tramo en Racha y otro en Diamante — ¿las llamas grises y los cristales grises se distinguen entre sí? (son el par de vecinos más difícil)</p>
+      <label><input type="radio" name="q-calm-racha-vs-diamante" value="OK"> OK</label>
+      <label><input type="radio" name="q-calm-racha-vs-diamante" value="FALLA"> FALLA</label>
+      <label><input type="radio" name="q-calm-racha-vs-diamante" value="SALTO"> Salto</label>
+      <textarea class="guion-nota" placeholder="Qué pasó"></textarea>
+      <textarea class="guion-evidencia" placeholder="Dump del probe (qa/out/dump-live.json) o pasos"></textarea>
+    </li>
+    <li class="guion-q" data-q="calm-gris-sin-tono">
+      <p class="guion-pregunta">En calma: ¿el efecto se ve gris puro, sin resto del color del peldaño (naranja de las llamas, azul de los cristales, colores del Duo)?</p>
+      <label><input type="radio" name="q-calm-gris-sin-tono" value="OK"> OK</label>
+      <label><input type="radio" name="q-calm-gris-sin-tono" value="FALLA"> FALLA</label>
+      <label><input type="radio" name="q-calm-gris-sin-tono" value="SALTO"> Salto</label>
+      <textarea class="guion-nota" placeholder="Qué pasó"></textarea>
+      <textarea class="guion-evidencia" placeholder="Dump del probe (qa/out/dump-live.json) o pasos"></textarea>
+    </li>
+    <li class="guion-q" data-q="calm-crono-en-color">
+      <p class="guion-pregunta">En calma: ¿el cronómetro, el riel y su etiqueta siguen en el color del peldaño, sin pasar a gris?</p>
+      <label><input type="radio" name="q-calm-crono-en-color" value="OK"> OK</label>
+      <label><input type="radio" name="q-calm-crono-en-color" value="FALLA"> FALLA</label>
+      <label><input type="radio" name="q-calm-crono-en-color" value="SALTO"> Salto</label>
+      <textarea class="guion-nota" placeholder="Qué pasó"></textarea>
+      <textarea class="guion-evidencia" placeholder="Dump del probe (qa/out/dump-live.json) o pasos"></textarea>
+    </li>
+    <li class="guion-q" data-q="calm-animado-intacto">
+      <p class="guion-pregunta">Con animaciones activas (Siempre, o el sistema pidiendo motion): ¿los efectos vuelven a su paleta a color y se mueven, igual que antes de este cambio?</p>
+      <label><input type="radio" name="q-calm-animado-intacto" value="OK"> OK</label>
+      <label><input type="radio" name="q-calm-animado-intacto" value="FALLA"> FALLA</label>
+      <label><input type="radio" name="q-calm-animado-intacto" value="SALTO"> Salto</label>
       <textarea class="guion-nota" placeholder="Qué pasó"></textarea>
       <textarea class="guion-evidencia" placeholder="Dump del probe (qa/out/dump-live.json) o pasos"></textarea>
     </li>

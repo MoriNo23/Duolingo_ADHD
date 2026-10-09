@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
 <meta charset="utf-8">
-<title>QA de campo — add-field-qa-loop (2.19.0)</title>
+<title>QA de campo — duolingo-native-panel-skin (2.24.0)</title>
 <style>
   :root { color-scheme: light dark; }
   body { font: 15px/1.5 system-ui, sans-serif; margin: 0 auto; max-width: 720px; padding: 24px 16px 80px; }
@@ -29,22 +29,23 @@
   .guion-pista { color: #999; font-size: 12px; margin: 2px 0 0; }
 </style>
 </head>
-<body data-key="add-field-qa-loop">
+<body data-key="duolingo-native-panel-skin">
 
 <header>
   <h1>Guion de QA de campo</h1>
   <p>Probás en <strong>duolingo.com real</strong>, respondés acá, exportás el reporte y el agente lo lee.
      Los verdictos son <strong>OK</strong> (funcionó), <strong>FALLA</strong> (no funcionó) o <strong>Salto</strong>
-     (no aplica / no lo probaste). En evidencia va lo que copiaste con
-     <em>Diagnóstico → Copiar diagnóstico</em> del panel del script (o lo que sirva: pasos, qué viste).</p>
+     (no aplica / no lo probaste). En evidencia va el dump del probe vivo
+     (<em>qa/out/dump-live.json</em>, generado con <em>npm run test:live</em>)
+     o lo que sirva: pasos, qué viste.</p>
 </header>
 
 <section id="guion-meta-sec">
   <h2>Datos del guion</h2>
   <div id="guion-meta">
-    <label>change <input id="guion-change" value="add-field-qa-loop"></label>
-    <label>versión <input id="guion-version" value="2.19.0"></label>
-    <label>fecha <input id="guion-fecha" value="2026-10-06"></label>
+    <label>change <input id="guion-change" value="reminder-desktop-notification"></label>
+    <label>versión <input id="guion-version" value="2.21.0"></label>
+    <label>fecha <input id="guion-fecha" value="2026-10-08"></label>
     <label><input type="checkbox" id="guion-salto-general"> Salto general: no hago esta ronda de QA
       <textarea id="guion-salto-motivo" class="guion-nota" placeholder="Motivo del salto (queda en el reporte)"></textarea>
     </label>
@@ -54,47 +55,75 @@
 <section id="guion-cambios-sec">
   <span class="guion-titulo guion-titulo">Sección por change</span>
   <h2 class="guion-titulo-h">Preguntas del change</h2>
-  <p class="guion-pista">Preguntas de ESTE change (generadas desde sus scenarios). Respondé con el sitio real abierto.</p>
+  <p class="guion-pista">Preguntas de ESTE change. La puerta de verdad: pestaña en background REAL (no emulada)
+     un rato largo y, si podés, el SO en No molestar. En evidencia: qué viste y cuándo.</p>
+    <p class="guion-pista">Preguntas de ESTE change: el panel viste la estructura de Duolingo (bordes 2px,
+     secciones como filas divididas, botones chunky en mayúsculas, textos bold) manteniendo el azul de siempre.
+    La pestaña ⚙ NO cambia. En evidencia servís capturas o describís qué viste.</p>
   <ol id="guion-cambios">
-    <li class="guion-q" data-q="guion-exporta">
-      <p class="guion-pregunta">(R1) El guion abre en el navegador, autoguarda (recargá a mitad y revisá) y el botón Descargar baja el reporte</p>
-      <label><input type="radio" name="q-guion-exporta" value="OK"> OK</label>
-      <label><input type="radio" name="q-guion-exporta" value="FALLA"> FALLA</label>
-      <label><input type="radio" name="q-guion-exporta" value="SALTO"> Salto</label>
+    <li class="guion-q" data-q="skin-card">
+      <p class="guion-pregunta">Abrí el panel en una lección: ¿la card blanca muestra ahora un borde gris de 2px que la separa de la página (lenguaje de card de Duolingo), manteniendo el aspecto de panel soldado al borde?</p>
+      <label><input type="radio" name="q-skin-card" value="OK"> OK</label>
+      <label><input type="radio" name="q-skin-card" value="FALLA"> FALLA</label>
+      <label><input type="radio" name="q-skin-card" value="SALTO"> Salto</label>
       <textarea class="guion-nota" placeholder="Qué pasó"></textarea>
-      <textarea class="guion-evidencia" placeholder="Diagnóstico copiado del companion (evidencia)"></textarea>
+      <textarea class="guion-evidencia" placeholder="Dump del probe (qa/out/dump-live.json) o pasos"></textarea>
     </li>
-    <li class="guion-q" data-q="companion-bloque">
-      <p class="guion-pregunta">(R2) Con el companion instalado en Tampermonkey, el botón QA aparece en duolingo.com y «Copiar diagnóstico» suelta el bloque (errores, artefactos, motion)</p>
-      <label><input type="radio" name="q-companion-bloque" value="OK"> OK</label>
-      <label><input type="radio" name="q-companion-bloque" value="FALLA"> FALLA</label>
-      <label><input type="radio" name="q-companion-bloque" value="SALTO"> Salto</label>
+    <li class="guion-q" data-q="skin-filas">
+      <p class="guion-pregunta">Mirá las secciones plegadas (Cronómetro, Sonido, Diario): ¿se leen como filas separadas por una línea gris de 2px, sin el fondo celeste de antes?</p>
+      <label><input type="radio" name="q-skin-filas" value="OK"> OK</label>
+      <label><input type="radio" name="q-skin-filas" value="FALLA"> FALLA</label>
+      <label><input type="radio" name="q-skin-filas" value="SALTO"> Salto</label>
       <textarea class="guion-nota" placeholder="Qué pasó"></textarea>
-      <textarea class="guion-evidencia" placeholder="Diagnóstico copiado del companion (evidencia)"></textarea>
+      <textarea class="guion-evidencia" placeholder="Dump del probe (qa/out/dump-live.json) o pasos"></textarea>
     </li>
-    <li class="guion-q" data-q="companion-sin-red">
-      <p class="guion-pregunta">(R2) El companion no hace peticiones de red (DevTools → Network mientras lo usás)</p>
-      <label><input type="radio" name="q-companion-sin-red" value="OK"> OK</label>
-      <label><input type="radio" name="q-companion-sin-red" value="FALLA"> FALLA</label>
-      <label><input type="radio" name="q-companion-sin-red" value="SALTO"> Salto</label>
+    <li class="guion-q" data-q="skin-botones">
+      <p class="guion-pregunta">Mirá los botones del panel (Probar efectos, Probar sonido, Reiniciar): ¿se ven en mayúsculas, texto grande y negrita, con borde de 2px y la sombra dura abajo que se hunde al hacer clic?</p>
+      <label><input type="radio" name="q-skin-botones" value="OK"> OK</label>
+      <label><input type="radio" name="q-skin-botones" value="FALLA"> FALLA</label>
+      <label><input type="radio" name="q-skin-botones" value="SALTO"> Salto</label>
       <textarea class="guion-nota" placeholder="Qué pasó"></textarea>
-      <textarea class="guion-evidencia" placeholder="Diagnóstico copiado del companion (evidencia)"></textarea>
+      <textarea class="guion-evidencia" placeholder="Dump del probe (qa/out/dump-live.json) o pasos"></textarea>
     </li>
-    <li class="guion-q" data-q="revert-limpio">
-      <p class="guion-pregunta">(Revert) El script publicado quedó igual que 2.19.0: panel con sus secciones de siempre, sin nada de QA</p>
-      <label><input type="radio" name="q-revert-limpio" value="OK"> OK</label>
-      <label><input type="radio" name="q-revert-limpio" value="FALLA"> FALLA</label>
-      <label><input type="radio" name="q-revert-limpio" value="SALTO"> Salto</label>
+    <li class="guion-q" data-q="skin-textos">
+      <p class="guion-pregunta">Leé el panel de arriba a abajo: ¿el título se ve más grande y los nombres de los controles en negrita, como el resto de la interfaz de Duolingo?</p>
+      <label><input type="radio" name="q-skin-textos" value="OK"> OK</label>
+      <label><input type="radio" name="q-skin-textos" value="FALLA"> FALLA</label>
+      <label><input type="radio" name="q-skin-textos" value="SALTO"> Salto</label>
       <textarea class="guion-nota" placeholder="Qué pasó"></textarea>
-      <textarea class="guion-evidencia" placeholder="Diagnóstico copiado del companion (evidencia)"></textarea>
+      <textarea class="guion-evidencia" placeholder="Dump del probe (qa/out/dump-live.json) o pasos"></textarea>
     </li>
-    <li class="guion-q" data-q="reporte-puerta">
-      <p class="guion-pregunta">(R3) El reporte exportado lleva front matter (change, version, fecha, resultado, fallas) y una sección por pregunta con Nota/Evidencia</p>
-      <label><input type="radio" name="q-reporte-puerta" value="OK"> OK</label>
-      <label><input type="radio" name="q-reporte-puerta" value="FALLA"> FALLA</label>
-      <label><input type="radio" name="q-reporte-puerta" value="SALTO"> Salto</label>
+    <li class="guion-q" data-q="skin-oscuro">
+      <p class="guion-pregunta">Con el modo oscuro de Duolingo activo: ¿la misma estructura se sostiene — borde y divisores grises oscuros, secciones sin fondo, todo legible?</p>
+      <label><input type="radio" name="q-skin-oscuro" value="OK"> OK</label>
+      <label><input type="radio" name="q-skin-oscuro" value="FALLA"> FALLA</label>
+      <label><input type="radio" name="q-skin-oscuro" value="SALTO"> Salto</label>
       <textarea class="guion-nota" placeholder="Qué pasó"></textarea>
-      <textarea class="guion-evidencia" placeholder="Diagnóstico copiado del companion (evidencia)"></textarea>
+      <textarea class="guion-evidencia" placeholder="Dump del probe (qa/out/dump-live.json) o pasos"></textarea>
+    </li>
+    <li class="guion-q" data-q="skin-controles">
+      <p class="guion-pregunta">Usá el panel como siempre: cambiá la cantidad de hitos, el idioma, abrí y cerra las tres secciones, mové los sliders y apretá Reiniciar. ¿Todo responde igual que antes?</p>
+      <label><input type="radio" name="q-skin-controles" value="OK"> OK</label>
+      <label><input type="radio" name="q-skin-controles" value="FALLA"> FALLA</label>
+      <label><input type="radio" name="q-skin-controles" value="SALTO"> Salto</label>
+      <textarea class="guion-nota" placeholder="Qué pasó"></textarea>
+      <textarea class="guion-evidencia" placeholder="Dump del probe (qa/out/dump-live.json) o pasos"></textarea>
+    </li>
+    <li class="guion-q" data-q="skin-readouts">
+      <p class="guion-pregunta">Entrá a la sección Diario (con y sin datos): ¿el promedio y el aviso de "sin datos" se ven con el estilo del panel, ya no en gris flojo aparte?</p>
+      <label><input type="radio" name="q-skin-readouts" value="OK"> OK</label>
+      <label><input type="radio" name="q-skin-readouts" value="FALLA"> FALLA</label>
+      <label><input type="radio" name="q-skin-readouts" value="SALTO"> Salto</label>
+      <textarea class="guion-nota" placeholder="Qué pasó"></textarea>
+      <textarea class="guion-evidencia" placeholder="Dump del probe (qa/out/dump-live.json) o pasos"></textarea>
+    </li>
+    <li class="guion-q" data-q="skin-pestaña">
+      <p class="guion-pregunta">Verificá la pestaña ⚙ del borde: ¿quedó EXACTAMENTE igual que antes (este cambio no la tocaba)?</p>
+      <label><input type="radio" name="q-skin-pestaña" value="OK"> OK</label>
+      <label><input type="radio" name="q-skin-pestaña" value="FALLA"> FALLA</label>
+      <label><input type="radio" name="q-skin-pestaña" value="SALTO"> Salto</label>
+      <textarea class="guion-nota" placeholder="Qué pasó"></textarea>
+      <textarea class="guion-evidencia" placeholder="Dump del probe (qa/out/dump-live.json) o pasos"></textarea>
     </li>
   </ol>
 </section>
@@ -110,7 +139,7 @@
       <label><input type="radio" name="q-smoke-boot" value="FALLA"> FALLA</label>
       <label><input type="radio" name="q-smoke-boot" value="SALTO"> Salto</label>
       <textarea class="guion-nota" placeholder="Qué pasó"></textarea>
-      <textarea class="guion-evidencia" placeholder="Evidencia (diagnóstico, pasos)"></textarea>
+      <textarea class="guion-evidencia" placeholder="Dump del probe (qa/out/dump-live.json) o pasos"></textarea>
     </li>
     <li class="guion-q" data-q="smoke-barra">
       <p class="guion-pregunta">S2. La barra de lección se detecta en /learn (aparecen segmentos)</p>
@@ -118,7 +147,7 @@
       <label><input type="radio" name="q-smoke-barra" value="FALLA"> FALLA</label>
       <label><input type="radio" name="q-smoke-barra" value="SALTO"> Salto</label>
       <textarea class="guion-nota" placeholder="Qué pasó"></textarea>
-      <textarea class="guion-evidencia" placeholder="Evidencia (diagnóstico, pasos)"></textarea>
+      <textarea class="guion-evidencia" placeholder="Dump del probe (qa/out/dump-live.json) o pasos"></textarea>
     </li>
     <li class="guion-q" data-q="smoke-riel">
       <p class="guion-pregunta">S3. Riel, cronómetro y overlay se ven bien sobre la barra real</p>
@@ -126,7 +155,7 @@
       <label><input type="radio" name="q-smoke-riel" value="FALLA"> FALLA</label>
       <label><input type="radio" name="q-smoke-riel" value="SALTO"> Salto</label>
       <textarea class="guion-nota" placeholder="Qué pasó"></textarea>
-      <textarea class="guion-evidencia" placeholder="Evidencia (diagnóstico, pasos)"></textarea>
+      <textarea class="guion-evidencia" placeholder="Dump del probe (qa/out/dump-live.json) o pasos"></textarea>
     </li>
     <li class="guion-q" data-q="smoke-panel">
       <p class="guion-pregunta">S4. El panel de ajustes abre, cierra y sus controles responden</p>
@@ -134,7 +163,7 @@
       <label><input type="radio" name="q-smoke-panel" value="FALLA"> FALLA</label>
       <label><input type="radio" name="q-smoke-panel" value="SALTO"> Salto</label>
       <textarea class="guion-nota" placeholder="Qué pasó"></textarea>
-      <textarea class="guion-evidencia" placeholder="Evidencia (diagnóstico, pasos)"></textarea>
+      <textarea class="guion-evidencia" placeholder="Dump del probe (qa/out/dump-live.json) o pasos"></textarea>
     </li>
     <li class="guion-q" data-q="smoke-sonido">
       <p class="guion-pregunta">S5. Los sonidos: Probar sonido suena, y el recordatorio respeta el idle</p>
@@ -142,7 +171,7 @@
       <label><input type="radio" name="q-smoke-sonido" value="FALLA"> FALLA</label>
       <label><input type="radio" name="q-smoke-sonido" value="SALTO"> Salto</label>
       <textarea class="guion-nota" placeholder="Qué pasó"></textarea>
-      <textarea class="guion-evidencia" placeholder="Evidencia (diagnóstico, pasos)"></textarea>
+      <textarea class="guion-evidencia" placeholder="Dump del probe (qa/out/dump-live.json) o pasos"></textarea>
     </li>
     <li class="guion-q" data-q="smoke-motion">
       <p class="guion-pregunta">S6. El nivel de animación se respeta (never/system/always hace lo esperado)</p>
@@ -150,7 +179,7 @@
       <label><input type="radio" name="q-smoke-motion" value="FALLA"> FALLA</label>
       <label><input type="radio" name="q-smoke-motion" value="SALTO"> Salto</label>
       <textarea class="guion-nota" placeholder="Qué pasó"></textarea>
-      <textarea class="guion-evidencia" placeholder="Evidencia (diagnóstico, pasos)"></textarea>
+      <textarea class="guion-evidencia" placeholder="Dump del probe (qa/out/dump-live.json) o pasos"></textarea>
     </li>
     <li class="guion-q" data-q="smoke-recordatorio">
       <p class="guion-pregunta">S7. El recordatorio no suena mientras practicás; suena tras 45 s quieto</p>
@@ -158,7 +187,7 @@
       <label><input type="radio" name="q-smoke-recordatorio" value="FALLA"> FALLA</label>
       <label><input type="radio" name="q-smoke-recordatorio" value="SALTO"> Salto</label>
       <textarea class="guion-nota" placeholder="Qué pasó"></textarea>
-      <textarea class="guion-evidencia" placeholder="Evidencia (diagnóstico, pasos)"></textarea>
+      <textarea class="guion-evidencia" placeholder="Dump del probe (qa/out/dump-live.json) o pasos"></textarea>
     </li>
     <li class="guion-q" data-q="smoke-journal">
       <p class="guion-pregunta">S8. El diario (si lo tenés activo) cuenta lecciones y tramos</p>
@@ -166,7 +195,15 @@
       <label><input type="radio" name="q-smoke-journal" value="FALLA"> FALLA</label>
       <label><input type="radio" name="q-smoke-journal" value="SALTO"> Salto</label>
       <textarea class="guion-nota" placeholder="Qué pasó"></textarea>
-      <textarea class="guion-evidencia" placeholder="Evidencia (diagnóstico, pasos)"></textarea>
+      <textarea class="guion-evidencia" placeholder="Dump del probe (qa/out/dump-live.json) o pasos"></textarea>
+    </li>
+    <li class="guion-q" data-q="smoke-notif">
+      <p class="guion-pregunta">S9. La notificación de escritorio salta con la pestaña oculta (y el panel avisa si el SO la bloquea)</p>
+      <label><input type="radio" name="q-smoke-notif" value="OK"> OK</label>
+      <label><input type="radio" name="q-smoke-notif" value="FALLA"> FALLA</label>
+      <label><input type="radio" name="q-smoke-notif" value="SALTO"> Salto</label>
+      <textarea class="guion-nota" placeholder="Qué pasó"></textarea>
+      <textarea class="guion-evidencia" placeholder="Dump del probe (qa/out/dump-live.json) o pasos"></textarea>
     </li>
   </ol>
 </section>

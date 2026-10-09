@@ -2,7 +2,7 @@
 // @name           Duolingo ADHD — Progress bar milestones (for the easily distracted / bored)
 // @name:es        Duolingo ADHD — Hitos de barra de progreso (para los que se aburren / se distraen)
 // @namespace      https://github.com/MoriNo23/duolingo-adhd
-// @version        2.19.0
+// @version        2.24.0
 // @description    Divide la barra de progreso de la lección en tramos. Modo tiempo: cada tramo arranca en Super y cada vez que el riel se agota baja un peldaño (Super→Madera); el peldaño en que cierres el tramo queda congelado. Cerrá rápido para congelar mejor jerarquía. Recompensas a pantalla completa en peldaños altos (Racha/Diamante/Super), cronómetro Baloo 2, diario local + panel EN/ES. Con sonido: fanfarria por peldaño y recordatorio periódico (Ajustes → Sonido). Mantiene el diseño nativo de Duolingo.
 // @description:en Splits the lesson progress bar into segments. Timer mode: every segment starts at the top tier (Super) and each time the rail runs out it drops one tier (Super→Wood) — the tier you close the segment on gets frozen. Close fast to freeze a better tier. Full-screen reward effects on high tiers (Streak/Diamond/Super), Baloo 2 clock, local journal + EN/ES settings. With sound: a tier fanfare on every segment close plus a periodic reminder (Settings → Sound). Keeps Duolingo's native design.
 // @description:es Divide la barra de progreso de la lección en tramos. Modo tiempo: cada tramo arranca en el nivel Super y va bajando de peldaño (Madera→Super) mientras se quema el presupuesto — cerrá rápido para congelar mejor jerarquía. Efectos de recompensa a pantalla completa en los peldaños altos (Racha/Diamante/Super), partículas, cronómetro Baloo 2, diario local + panel EN/ES. Con sonido: fanfarria por peldaño y recordatorio periódico (Ajustes → Sonido). Mantiene el diseño nativo de Duolingo.
@@ -17,6 +17,7 @@
 // @grant        GM_setValue
 // @grant        GM_addStyle
 // @grant        GM_xmlhttpRequest
+// @grant        GM_notification
 // @connect      fonts.googleapis.com
 // @connect      fonts.gstatic.com
 // @run-at       document-idle
@@ -90,6 +91,12 @@ const DEFAULTS = {
   // sigue a un click: 'system' = respetar la preferencia del escritorio, 'never' =
   // apagarlas siempre. Un config que YA tiene nivel guardado lo conserva.
   motionLevel: 'always',
+  // tier-motion-per-seg: desde qué peldaño el canvas celebra animado cuando
+  // el movimiento está permitido (3=racha, 4=diamante, 5=super, 6=ninguno).
+  // Default 3 = el comportamiento de siempre: los tres altos animan y los
+  // bajos nunca tuvieron canvas. Una config guardada antes de este cambio
+  // la conserva (Object.assign solo completa lo faltante).
+  tierMotionFloor: 3,
   // rail-fixed-lap-ceiling: la clave `timerHardness` ya no se lee ni se escribe.
   // Sigue en DEFAULTS para que los cfgs guardados sigan cargando sin romper.
   timerHardness: 35,
@@ -102,6 +109,11 @@ const DEFAULTS = {
   soundCues: true,         // fanfarria del peldaño al cerrar un tramo
   reminderEnabled: true,   // recordatorio periódico mientras duolingo.com está abierto
   reminderSeconds: 60,     // intervalo del recordatorio (15–900 s, ver clampReminderSeconds)
+  // reminder-desktop-notification: escala a notificación de escritorio cuando
+  // la pestaña está oculta (el canal del manager, nunca el permiso del sitio).
+  // Arranca ENCENDIDO como los sonidos; una config guardada antes de este
+  // cambio la conserva (Object.assign pisa con el default solo lo faltante).
+  reminderNotifEnabled: true,
 };
 
 // ---------- timer-mode-ux constantes + preview (pure core) ----------
@@ -154,6 +166,13 @@ const I18N = {
     motionSystem:    'Respetar sistema',
     motionAlways:    'Siempre',
     motionNever:     'Nunca',
+    // tier-motion-per-seg: desde qué peldaño el cierre celebra con animación
+    lblTierMotion:   'Celebración animada',
+    tierMotionRacha:    'Racha, Diamante y Super',
+    tierMotionDiamante: 'Diamante y Super',
+    tierMotionSuper:     'Solo Super',
+    tierMotionNone:      'Ninguna (solo partículas)',
+    hintTierMotion:  'Con el movimiento permitido, desde qué peldaño el cierre celebra con animación en pantalla. Los peldaños por debajo solo disparan las partículas. Si tu sistema pide calma, nada se mueve pase lo que pongas acá.',
     // audio-cues: sección SONIDO del panel
     secSonido:       'Sonido',
     lblSoundCues:    'Sonidos por peldaño',
@@ -162,6 +181,14 @@ const I18N = {
     hintReminder:    'Suena cada cierto tiempo mientras duolingo.com está abierto, en cualquier pantalla — pero solo si llevas 45 s sin interactuar, para no interrumpirte mientras practicas.',
     lblReminderInterval: 'Cada cuánto',
     btnTestSound:    'Probar sonido',
+    // reminder-desktop-notification: textos de la notificación de escritorio
+    notifTitle:      'Duolingo ADHD — recordatorio',
+    notifBody:       'Es hora de volver a la lección.',
+    // ...y los del panel (toggle + fallar visible)
+    lblReminderNotif: 'Notificación de escritorio',
+    hintReminderNotif: 'Con la pestaña en segundo plano, el recordatorio salta como notificación del sistema. La emite el gestor de userscripts, no duolingo.com; nada sale de tu navegador.',
+    notifBlocked:    'La última notificación no se entregó: revisá si el sistema silencia notificaciones (No molestar en GNOME, Asistente de foco en Windows).',
+    notifUnsupported: 'Tu gestor de userscripts no ofrece notificaciones: con la pestaña oculta el recordatorio queda pendiente y suena al volver.',
   },
   en: {
     panelTitle:      'Progress bar segments (ADHD)',
@@ -204,6 +231,13 @@ const I18N = {
     motionSystem:    'Respect system',
     motionAlways:    'Always',
     motionNever:     'Never',
+    // tier-motion-per-seg: from which tier a closure celebrates with animation
+    lblTierMotion:   'Animated celebration',
+    tierMotionRacha:    'Streak, Diamond and Super',
+    tierMotionDiamante: 'Diamond and Super',
+    tierMotionSuper:     'Super only',
+    tierMotionNone:      'None (particles only)',
+    hintTierMotion:  'With motion allowed, from which tier a closure celebrates with a full-screen animation. Tiers below it only fire the particles. If your system asks for calm, nothing moves no matter what you set here.',
     // audio-cues: sound section of the panel
     secSonido:       'Sound',
     lblSoundCues:    'Tier sounds',
@@ -212,6 +246,14 @@ const I18N = {
     hintReminder:    'Plays on an interval while duolingo.com is open, on any screen — but only after 45 s without interaction, so it never interrupts you mid-lesson.',
     lblReminderInterval: 'Every',
     btnTestSound:    'Test sound',
+    // reminder-desktop-notification: desktop notification texts
+    notifTitle:      'Duolingo ADHD — reminder',
+    notifBody:       'Time to get back to your lesson.',
+    // ...and the panel's (toggle + failing visibly)
+    lblReminderNotif: 'Desktop notification',
+    hintReminderNotif: 'With the tab in the background, the reminder surfaces as a system notification. The userscript manager delivers it, not duolingo.com; nothing leaves your browser.',
+    notifBlocked:    'The last notification was not delivered: check whether your system is silencing notifications (Do Not Disturb on GNOME, Focus Assist on Windows).',
+    notifUnsupported: 'Your userscript manager does not provide notifications: while the tab is hidden the reminder stays pending and plays when you come back.',
   },
 };
 function tr(lang, key) { return (I18N[lang] && I18N[lang][key]) || I18N.es[key]; }
@@ -352,6 +394,35 @@ function resolveMotion(level, systemReduced) {
 }
 
 const MOTION_LEVELS = ['system', 'always', 'never'];
+
+// tier-motion-per-seg: el eje por peldaño. La decisión resuelta del PAR:
+// motionLevel dice SI puede haber movimiento (resolveMotion, contrato que no
+// se toca); el piso dice DESDE qué peldaño el canvas celebra animado cuando
+// el movimiento está permitido. Salidas: 'reduced' (la presentación calmada
+// de siempre — gris, quieta), 'animated' (el canvas completo) y 'off' (este
+// peldaño no celebra con canvas: solo el burst de CSS de siempre).
+// Accesibilidad primero y sin excepción (spec motion-preference): si la
+// decisión de motion ya resolvió calma, TODO peldaño resuelve 'reduced' y el
+// eje no aparece en ese camino — ningún valor elegido puede re-habilitar
+// movimiento que el usuario o el sistema pidieron suprimir. El eje solo
+// elige MÁS animación dentro del rango ya permitido.
+function tierMotionFor(state) {
+  if (!state) return 'off';
+  if (resolveMotion(state.level, state.reduce)) return 'reduced';
+  // Movimiento permitido: los peldaños bajos nunca ganan efecto canvas
+  // (spec reward-fx: "the lower tiers SHALL NOT gain a canvas effect").
+  if (!Number.isInteger(state.rung) || state.rung < 3) return 'off';
+  return state.rung >= clampTierMotionFloor(state.floor) ? 'animated' : 'off';
+}
+
+// tier-motion-per-seg: el piso reconocido. Solo 3/4/5/6 son valores válidos
+// (racha / diamante / super / ninguno); cualquier otra cosa — config vieja,
+// editada a mano, corrupta — cae al default enviado, que es el comportamiento
+// de siempre. Nunca deja los efectos en estado indefinido (spec reward-fx:
+// "an unrecognised stored value SHALL fall back to the shipped default").
+function clampTierMotionFloor(v) {
+  return (v === 3 || v === 4 || v === 5 || v === 6) ? v : DEFAULTS.tierMotionFloor;
+}
 
 function getTimerGoalMs(cfg) {
   return (cfg.timerMinutes * 60 + cfg.timerSeconds) * 1000;
@@ -540,6 +611,45 @@ function canPlayReminder(state) {
   return state.now - state.lastInteractionAt >= REMINDER_IDLE_MS;
 }
 
+// reminder-desktop-notification: la decisión "vence ahora, ¿qué hago?",
+// extraída del tick como función pura — es el paso que hace testeable el
+// canal de escritorio: la rama oculta deja de ser un `return false`
+// enterrado en canPlayReminder y pasa a ser una salida con nombre.
+// Contrato: 'play' (visible + idle: suena), 'notify' (oculto + notificación
+// activada: escala al escritorio — el SO entrega sin importar cuánto hace
+// que la pestaña no se ve, el throttling del browser no lo alcanza),
+// 'pending' (enfocado, u oculto sin canal: la deuda es UNA, nunca una
+// ráfaga), 'none' (antes de vencer o basura: nada que hacer). notifEnabled
+// estrictamente true: basura o desactivada → el silencio de antes.
+function reminderAction(state) {
+  if (!state) return 'none';
+  if (!Number.isFinite(state.now) || !Number.isFinite(state.nextAt)) return 'none';
+  if (state.now < state.nextAt) return 'none';
+  if (state.hidden) return state.notifEnabled === true ? 'notify' : 'pending';
+  if (!Number.isFinite(state.lastInteractionAt)) return 'none';
+  return state.now - state.lastInteractionAt >= REMINDER_IDLE_MS ? 'play' : 'pending';
+}
+
+// reminder-desktop-notification: el canal de escritorio. GM_notification es
+// del MANAGER (ya concedido en Tampermonkey): no se le pide permiso al sitio
+// y la notificación no se atribuye a duolingo.com — la Notification de la
+// página no se toca (spec: "Notification permission is not requested from
+// the page"). Feature-detect obligatorio: un @grant declarado no garantiza
+// que la función exista (Violentmonkey, Greasemonkey, Safari). silent: true
+// — el sonido lo pone el script si el audio está vivo; la notificación
+// pone el texto, así el aviso no depende del volumen del sistema.
+// 'sent' | 'blocked' (el intento no se entrega) | 'unsupported' (no hay
+// API: degradación al comportamiento anterior). JAMÁS lanza.
+function notifyReminder(title, text) {
+  try {
+    if (typeof GM_notification !== 'function') return 'unsupported';
+    GM_notification({ title: title, text: text, silent: true, timeout: 10000, duration: 10000 });
+    return 'sent';
+  } catch (e) {
+    return 'blocked';
+  }
+}
+
 // fix-crono-contrast: el contador lleva el color del peldaño como SUPERFICIE y
 // su dígito se empareja para ser legible sobre ella. Antes el color iba como
 // texto sobre una pill oscura (madera 1.29:1, bronce 1.09:1, super 1.40:1).
@@ -557,6 +667,59 @@ function contrastOfLuminances(l1, l2) {
   return (hi + 0.05) / (lo + 0.05);
 }
 
+// calm-canvas-grayscale: rampa de grises para la presentacion calmada.
+// Cada efecto sirve a EXACTAMENTE un peldano (FX_BY_RUNG: 3 racha, 4 diamante,
+// 5 super) con paleta hardcodeada: no hay color de peldano que re-mapear, asi
+// que el ramp son tres grises elegidos a mano con >=1.5:1 entre consecutivos.
+// Los peldaños bajos no tienen efecto canvas: resuelven null.
+const CALM_GREYS = { 3: '#565656', 4: '#9e9e9e', 5: '#e2e2e2' };
+function calmGreyFor(rung) {
+  return Object.prototype.hasOwnProperty.call(CALM_GREYS, rung) ? CALM_GREYS[rung] : null;
+}
+
+// seg-skin-earned-at-close: el tono dormido del tramo que llena. Desaturacion
+// a LUMINANCIA CONSTANTE — mezcla hacia el gris de la propia luminancia en
+// espacio lineal: Y se preserva exacto (el orden de la escalera sobrevive por
+// construccion), la direccion de croma lineal queda intacta (el matiz no cambia
+// de familia) y solo la saturacion cae. Nunca un gris uniforme: colapsaria la
+// escalera (Plata<->Racha 1.01:1, el par que motion-preference deja registrado).
+// El gris puro entra y sale igual: ya es quieto. levelColor interpola en
+// formato rgb(...) cuando hay mas tramos que rarezas, asi que tambien entra.
+const DORMANT_DESAT = 0.65; // cuanto se mezcla hacia el gris: croma *= 0.35
+const LEGENDARY_ANCHOR = '#7c3aed'; // ancla violeta del gradiente epico
+function dormantTone(hex) {
+  let r, g, b;
+  if (typeof hex === 'string' && /^#[0-9a-fA-F]{6}$/.test(hex)) {
+    [r, g, b] = hexToRgb(hex);
+  } else if (typeof hex === 'string') {
+    const m = hex.match(/^rgb\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)$/);
+    if (!m) return null;
+    r = +m[1]; g = +m[2]; b = +m[3];
+    if (r > 255 || g > 255 || b > 255) return null;
+  } else {
+    return null;
+  }
+  if (r === g && g === b) {
+    return '#' + [r, g, b].map((n) => n.toString(16).padStart(2, '0')).join('');
+  }
+  const lin = (c) => (c / 255 <= 0.03928 ? c / 255 / 12.92 : Math.pow((c / 255 + 0.055) / 1.055, 2.4));
+  const Y = 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+  const mix = (c) => {
+    const m = (1 - DORMANT_DESAT) * lin(c) + DORMANT_DESAT * Y;
+    const s = m <= 0.0031308 ? m * 12.92 : 1.055 * Math.pow(m, 1 / 2.4) - 0.055;
+    return Math.max(0, Math.min(255, Math.round(s * 255)));
+  };
+  return '#' + [mix(r), mix(g), mix(b)].map((n) => n.toString(16).padStart(2, '0')).join('');
+}
+// Escala un gris por factor con clamp. Basura (hex invalido, factor no
+// finito) -> null: nunca lanza. Solo pisa el eje neutro: r === g === b
+// siempre, asi el que lo usa no puede introducir tono por accidente.
+function shadeGrey(hex, f) {
+  if (typeof hex !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(hex)) return null;
+  if (!Number.isFinite(f)) return null;
+  const v = [1, 3, 5].map((i) => Math.max(0, Math.min(255, Math.round(parseInt(hex.slice(i, i + 2), 16) * f))));
+  return '#' + v.map((n) => n.toString(16).padStart(2, '0')).join('');
+}
 // Dígito del contador: blanco o la tinta del peldaño, el que más contraste dé
 // contra la superficie (cociente WCAG real: comparar solo |L1 - L2| NO sirve,
 // porque el dígito puede caer de cualquiera de los dos lados del fondo).
@@ -580,15 +743,22 @@ const CORE = {
   getTimerGoalMs,
   // animations-panel-setting: resolucion de la preferencia de animacion
   resolveMotion, MOTION_LEVELS,
+  // tier-motion-per-seg: el eje por peldaño
+  tierMotionFor, clampTierMotionFloor,
   // Feature 3: journal
   loadJournal, saveJournal, todayKey, initJournal, getJournal,
   recordLesson, recordSeparators, recordRaceTime, resetJournal,
   // audio-cues: qué suena y cada cuánto (núcleo puro del sonido)
   cueForRung, clampReminderSeconds, formatIntervalLabel, canPlayReminder,
+  reminderAction, notifyReminder,
   SOUND_CUE_IDS, RUNG_CUES, SATISFYING_CUES,
   REMINDER_MIN_SECONDS, REMINDER_MAX_SECONDS, REMINDER_DEFAULT_SECONDS, REMINDER_IDLE_MS,
   // fix-crono-contrast: par superficie/dígito legible del contador
   cronoTextColor, hexLuminance,
+  // calm-canvas-grayscale: rampa de grises de la presentacion calmada
+  calmGreyFor, shadeGrey,
+  // seg-skin-earned-at-close: el tono dormido del tramo que llena
+  dormantTone, LEGENDARY_ANCHOR, DORMANT_DESAT,
   // lesson-only-overlay + lesson-bar-container-anchor: detection
   isLessonScreen, isLessonBar, findLessonBarByAnchor, findBarBySignature,
 };
@@ -724,7 +894,11 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
 const TAU=Math.PI*2,clamp=(x,a=0,b=1)=>Math.max(a,Math.min(b,x)),rand=(a,b)=>a+Math.random()*(b-a),ease=t=>1-Math.pow(1-clamp(t),3);
 const ORANGE='#EF9B38',YELLOW='#F7CA45';
 // Normalized paths redrawn from the supplied streak flame, not a bitmap.
-function flame(ctx,width,time,seed=0,motion=1){
+function flame(ctx,width,time,seed=0,motion=1,cols){
+ // calm-canvas-grayscale: paleta opcional [exterior, nucleo]. Default: los
+ // naranjas de siempre (el camino animado queda byte-identico en
+ // comportamiento). En calma el draw pasa dos grises del ramp de racha.
+ const C = cols || [ORANGE, YELLOW];
  const t=time,phase=seed;
  ctx.save();ctx.scale(width/340,width/340);ctx.translate(-170,-200);
  const wave=Math.sin(t*4.2+phase)*.72+Math.sin(t*7.1+phase*1.7)*.28;
@@ -752,7 +926,7 @@ function flame(ctx,width,time,seed=0,motion=1){
   ['L',291,135],['C',322,176,340,211,340,253],
   ['C',340,346,268,415,173,415],
   ['C',76,415,0,349,0,254],['L',0,98],['Z']
- ],ORANGE);
+ ],C[0]);
  // A separate warm-yellow core, independently morphing in place.
  path([
   ['M',155,184],['C',164,169,178,167,189,184],
@@ -760,7 +934,7 @@ function flame(ctx,width,time,seed=0,motion=1){
   ['C',229,337,201,354,171,353],
   ['C',137,353,109,338,100,311],
   ['C',90,286,97,264,112,243],['L',155,184],['Z']
- ],YELLOW,true);
+ ],C[1],true);
  // Successive drops peel off, drift upwards and disappear. They stay orange
  // and retain the reference teardrop shape, rather than becoming glitter.
  for(let k=0;k<(motion?2:1);k++){
@@ -772,7 +946,7 @@ function flame(ctx,width,time,seed=0,motion=1){
   ctx.save();ctx.globalAlpha*=fade;ctx.translate(px,py);ctx.scale(sz,sz);
   ctx.beginPath();ctx.moveTo(0,-28);ctx.bezierCurveTo(12,-23,35,3,26,18);
   ctx.bezierCurveTo(21,30,-3,30,-10,17);ctx.bezierCurveTo(-17,6,-7,-19,0,-28);
-  ctx.closePath();ctx.fillStyle=ORANGE;ctx.fill();ctx.restore();
+  ctx.closePath();ctx.fillStyle=C[0];ctx.fill();ctx.restore();
  }
  ctx.restore();
 }
@@ -805,7 +979,13 @@ class StreakFlames{
    const x=mx+p.nx*w,y=top+p.ny*h+(this.reduced?0:Math.sin(t*1.2+p.seed)*1.7);
    c.save();c.globalAlpha=entry*exit;c.translate(x,y+(1-entry)*13);
    c.scale(1-breath,1+breath);
-   flame(c,base*p.scale*(.80+.20*entry),t*p.rate,p.seed,this.reduced?0:1);
+   // calm-canvas-grayscale: este efecto sirve al peldano racha (3) y nada mas
+   // (FX_BY_RUNG). En calma la paleta naranja se cambia por dos grises del
+   // ramp: exterior oscuro + nucleo en el valor asignado. Sin calma, undefined
+   // y flame() usa sus naranjas: el camino animado no cambia.
+   const G3 = this.reduced ? calmGreyFor(3) : null;
+   flame(c,base*p.scale*(.80+.20*entry),t*p.rate,p.seed,this.reduced?0:1,
+     G3 ? [shadeGrey(G3, 0.55), G3] : undefined);
    c.restore();
   }
  }
@@ -844,7 +1024,11 @@ for(let i=0;i<8;i++)F.push([24+i,24+(i+1)%8,32]);
 const dot=(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
 const norm=v=>{const d=Math.hypot(...v)||1;return v.map(x=>x/d)};
 function rot([x,y,z],ax,ay,az){let c=Math.cos(ay),s=Math.sin(ay);[x,z]=[x*c+z*s,-x*s+z*c];c=Math.cos(ax);s=Math.sin(ax);[y,z]=[y*c-z*s,y*s+z*c];c=Math.cos(az);s=Math.sin(az);return [x*c-y*s,x*s+y*c,z];}
-function crystal(ctx,size,ax,ay,az,time){
+function crystal(ctx,size,ax,ay,az,time,anchor){
+ // calm-canvas-grayscale: anchor es el gris asignado al peldano de este efecto
+ // (el del diamante) o null. Con anchor, el tono se va (sat 0) y la
+ // luz de las facetas se centra en la claridad del anchor en vez de recorrer
+ // 17-99%: el juego de facetas sigue, pero en grises de ese peldano.
  const pts=V.map(v=>rot(v,ax,ay,az));
  const key=norm([-.75+Math.sin(time*.5)*.2,-.95,1.3]);
  const fill=norm([.85,.12,.55]),half=norm([key[0],key[1],key[2]+1]);
@@ -863,10 +1047,20 @@ function crystal(ctx,size,ax,ay,az,time){
   const band=Math.pow(clamp(.5+.5*Math.sin(Math.atan2(reflection[0],reflection[2])*3.5+reflection[1]*5)),10);
   const glint=clamp(spec*1.15+band*.33);
   const light=clamp(.12+diffuse*.52+secondary*.17+glint*.40);
-  const hue=207-light*17,saturation=85-glint*65,lum=22+light*59+spec*16;
-  ctx.fillStyle=`hsl(${hue} ${clamp(saturation,15,95)}% ${clamp(lum,17,99)}%)`;
+  const hue=207-light*17,saturation=85-glint*65;
+  // Con anchor: grises centrados en su claridad (canal/255 como proxy).
+  // Sin anchor: los azulados de siempre.
+  let lum=22+light*59+spec*16, sat=saturation, h= hue, stroke='rgba(206,248,255,';
+  if (anchor) {
+    const m = /^#([0-9a-fA-F]{2})/.exec(anchor);
+    const base = m ? parseInt(m[1], 16) / 255 * 100 : 60;
+    lum=clamp(base-30+light*60+spec*16,4,98); sat=0; h=0;
+    const ch = Math.round(base / 100 * 255);
+    stroke=`rgba(${ch},${ch},${ch},`;
+  }
+  ctx.fillStyle=`hsl(${h} ${clamp(sat,0,100)}% ${clamp(lum,4,99)}%)`;
   ctx.beginPath();p.forEach(([x,y,z],i)=>{const q=2.65/(2.65-z);i?ctx.lineTo(x*q,y*q):ctx.moveTo(x*q,y*q)});ctx.closePath();ctx.fill();
-  ctx.lineWidth=.007;ctx.strokeStyle=`rgba(206,248,255,${.13+diffuse*.26+spec*.35})`;ctx.stroke();
+  ctx.lineWidth=.007;ctx.strokeStyle=`${stroke}${.13+diffuse*.26+spec*.35})`;ctx.stroke();
  }
  ctx.restore();
 }
@@ -897,7 +1091,10 @@ class CrystalReward{
    const perspective=3/(3-p.z*.55);
    const x=mx+p.nx*w+(this.reduced?0:Math.cos(a*1.15+p.seed)*base*.08),y=top+p.ny*h+(this.reduced?0:Math.sin(a*1.15+p.seed)*base*.08);
    c.save();c.translate(x,y);c.globalAlpha=clamp(age/.17)*fade;
-   crystal(c,base*p.scale*growth*perspective*entry,-.35+a*p.pitch+Math.sin(a*1.2+p.seed)*.28,p.seed+a*p.speed,Math.sin(a*.9+p.seed)*.32,a);
+   // calm-canvas-grayscale: este efecto sirve al peldano diamante (4) y nada
+   // mas (FX_BY_RUNG). Sin anchor, los azulados de siempre.
+   crystal(c,base*p.scale*growth*perspective*entry,-.35+a*p.pitch+Math.sin(a*1.2+p.seed)*.28,p.seed+a*p.speed,Math.sin(a*.9+p.seed)*.32,a,
+     this.reduced ? calmGreyFor(4) : null);
    c.restore();
   }
  }
@@ -921,6 +1118,36 @@ window.CrystalReward=CrystalReward;
   'use strict';
   const SPRITE = 'data:image/png;base64,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';
   const colors = ['#58CC02', '#A4F842', '#20D9EF', '#9270FF', '#CF79FF'];
+  // calm-canvas-grayscale: copia en grises del sprite de Duo, centrada en el
+  // anchor del ramp de super. Devuelve canvas (fuente valida para drawImage,
+  // sin async: el sprite ya esta cargado cuando se llama desde burst()).
+  // Cada pixel conserva su alfa y su sombreado RELATIVO a la media del sprite:
+  // los claros quedan sobre el anchor y los oscuros debajo, asi la media de lo
+  // pintado cae EN el anchor (la presentacion lleva el valor del ramp, no uno
+  // derivado del contenido del sprite). Ningun pixel resultante tiene tono.
+  function greySprite(img, anchor) {
+    const m = /^#([0-9a-fA-F]{2})/.exec(anchor || '');
+    const A = m ? parseInt(m[1], 16) : 160;
+    const cv = document.createElement('canvas');
+    cv.width = img.naturalWidth || img.width; cv.height = img.naturalHeight || img.height;
+    const g = cv.getContext('2d'); g.drawImage(img, 0, 0);
+    const d = g.getImageData(0, 0, cv.width, cv.height), px = d.data;
+    let sum = 0, n = 0, i;
+    for (i = 0; i < px.length; i += 4) {
+      if (!px[i + 3]) continue;
+      sum += (0.2126 * px[i] + 0.7152 * px[i + 1] + 0.0722 * px[i + 2]) / 255;
+      n++;
+    }
+    const media = n ? sum / n : 1;   // sprite sin pixeles opacos: mapping neutro
+    for (i = 0; i < px.length; i += 4) {
+      if (!px[i + 3]) continue;
+      const L = (0.2126 * px[i] + 0.7152 * px[i + 1] + 0.0722 * px[i + 2]) / 255;
+      const v = Math.max(0, Math.min(255, Math.round(A * (media > 0 ? L / media : 1))));
+      px[i] = px[i + 1] = px[i + 2] = v;
+    }
+    g.putImageData(d, 0, 0);
+    return cv;
+  }
   const rand = (a,b) => a + Math.random()*(b-a);
   const clamp = (x,a=0,b=1) => Math.max(a,Math.min(b,x));
   const ease = t => 1-Math.pow(1-t,3);
@@ -954,8 +1181,13 @@ window.CrystalReward=CrystalReward;
     async burst({x=this.w/2,y=this.h*.49,count=this.count,duration=this.duration}={}) {
       await this.ready;
       if(this.dead) return;
-      const scale=clamp(Math.min(this.w/850,this.h/620),.45,1.2);
+      // calm-canvas-grayscale: este efecto sirve al peldano super (5) y nada
+      // mas (FX_BY_RUNG). En calma: sprite en grises + particulas en dos tonos
+      // del anchor. Sin calma, los colores de siempre.
       const reduced=this.reduced;
+      const G5 = reduced ? calmGreyFor(5) : null;
+      if (reduced && !this.greyCanvas && G5) this.greyCanvas = greySprite(this.image, G5);
+      const scale=clamp(Math.min(this.w/850,this.h/620),.45,1.2);
       const life=reduced?700:Math.max(500,duration);
       const run={x,y,start:performance.now(),life,particles:[],scale};
       const add=(type,n)=>{
@@ -975,7 +1207,7 @@ window.CrystalReward=CrystalReward;
           run.particles.push({type,delay:reduced?0:rand(0,.13),tx,ty,
             size:type==='owl'?owlSize:rand(3,8)*scale,
             angle:rand(-.55,.55),spin:rand(-1.5,1.5),phase:rand(0,Math.PI*2),
-            color:colors[Math.floor(rand(0,colors.length))],
+            color:reduced ? (G5 && Math.random() < .5 ? G5 : shadeGrey(G5 || '#888888', .85)) : colors[Math.floor(rand(0,colors.length))],
             end:rand(.86,1),spread:rand(.48,.72)});
         }
       };
@@ -1038,7 +1270,9 @@ window.CrystalReward=CrystalReward;
           const spring=this.reduced?0:Math.sin(t*19+p.phase)*Math.exp(-t*5)*.20;
           c.scale(1+spring,1-spring);
           c.shadowColor=p.color;c.shadowBlur=7*r.scale*(1-clamp(t/1.25));
-          c.drawImage(this.image,-size/2,-size*.858/2,size,size*.858);
+          // En calma el sprite es la copia en grises (shadowColor y particulas
+          // ya vienen grises del burst). Sin calma, el sprite a color.
+          c.drawImage((this.reduced && this.greyCanvas) ? this.greyCanvas : this.image,-size/2,-size*.858/2,size,size*.858);
         } else {
           c.fillStyle=p.color;
           if(p.type==='star') {if(!this.reduced)c.globalAlpha*=.65+.35*Math.sin(t*13+p.phase)**2;this.star(c,size);}
@@ -1075,6 +1309,11 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
   (function () {
     const stored = GM_getValue('adhd_config', {});
     const cfg = Object.assign({}, DEFAULTS, stored, { lang: stored.lang || detectLang(navigator.language) });
+    // reminder-desktop-notification: un valor corrupto o editado a mano del
+    // toggle de notificación cae al default — nunca queda en estado
+    // indefinido (con basura, la decisión `=== true` leería "apagada"
+    // mientras el panel mostrara otra cosa).
+    if (typeof cfg.reminderNotifEnabled !== 'boolean') cfg.reminderNotifEnabled = DEFAULTS.reminderNotifEnabled;
     function save() { GM_setValue('adhd_config', cfg); }
     // decay-timeline-visibility (D5): punto único de escritura de cfg. Antes
     // había 8 pares `cfg.x = ...; save();` dispersos (panel) y era fácil
@@ -1086,7 +1325,7 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
     GM_addStyle(`
       body.adhd-dark .adhd-btn { background:#1f2b33; color:#1cb0f6; box-shadow:none; }
       body.adhd-dark .adhd-btn:hover { background:#27363f; }
-      body.adhd-dark .adhd-panel { background:#1e2a31; border-radius:16px 0 0 16px; box-shadow:-2px 0 0 #0c1419; }
+      body.adhd-dark .adhd-panel { background:#1e2a31; border:2px solid #3a4a52; border-radius:16px 0 0 16px; box-shadow:-2px 0 0 #0c1419; }
       body.adhd-dark .adhd-panel label { color:#c9d1d9; }
       body.adhd-dark .adhd-panel input[type=range], body.adhd-dark .adhd-panel select { background:#142026; border-color:#3a4a52; color:#e5e5e5; }
       body.adhd-dark .adhd-panel h4 { color:#fff; }
@@ -1096,9 +1335,10 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
       body.adhd-dark .adhd-divider { border-top-color:#3a4a52; }
       body.adhd-dark .adhd-panel button { background:#142026; border-color:#3a4a52; color:#e5e5e5; box-shadow:0 4px 0 #0b1216; }
       body.adhd-dark .adhd-panel button:active { box-shadow:0 0 0 #0b1216; }
-      /* timer-mode-ux: dark theme para secciones */
-      body.adhd-dark .adhd-panel summary { color:#84d8ff; background:rgba(132,216,255,.08); }
+      /* timer-mode-ux: dark theme para secciones — duolingo-native-panel-skin: fila dividida */
+      body.adhd-dark .adhd-panel summary { color:#84d8ff; border-bottom:2px solid #3a4a52; }
       body.adhd-dark .adhd-panel .adhd-hint { color:#8fa3ad; }
+      body.adhd-dark .adhd-readout { color:#8fa3ad; }
     `);
     function isDarkTheme() {
       const bg = getComputedStyle(document.body).backgroundColor || '';
@@ -1282,6 +1522,11 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
     // No depende de la barra ni de la pantalla: suena en cualquier screen.
     let reminderTimer = 0, reminderNextAt = 0, reminderPending = false;
     let lastInteractionAt = 0, pendingReturnAt = 0;
+    // reminder-desktop-notification: último resultado del canal de escritorio
+    // ('blocked' | 'unsupported' | null = entregada). El panel lo muestra
+    // (3.x): un toggle que dice "on" mientras nada llega es peor que no tener
+    // toggle. Se limpia en el próximo intento que SÍ se entrega (spec).
+    let notifDeliveryState = null;
     const REMINDER_TICK_MS = 1000;
     const REMINDER_RETURN_GRACE_MS = 5000;
     // Los seis gestos que cuentan como "estás usando la página". Capture para
@@ -1307,18 +1552,57 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
     }
     function syncReminder() { if (cfg.reminderEnabled) startReminder(); else stopReminder(); }
 
-    // Máquina de estados mínima: si toca enfocado u oculto queda UNO pendiente
-    // (sin mover el vencimiento), así nunca se acumula deuda ni suena una ráfaga
-    // al volver; suena cuando el idle lo permite y el próximo intervalo nace de
-    // ESE momento (spec: "plays once the user becomes idle", "at most one
-    // reminder instead of a burst").
+    // reminder-desktop-notification: el panel dice lo que pasó con el último
+    // intento del canal de escritorio. Un toggle que lee "prendido" mientras
+    // nada llega es peor que no tener toggle (spec: el panel distingue
+    // entregando de bloqueado). Se limpia solo: el próximo intento que SÍ se
+    // entrega esconde el aviso, sin recargar nada.
+    function renderNotifStatus() {
+      const el = document.querySelector('#adhd-reminder-notif-status');
+      if (!el) return;
+      if (!notifDeliveryState) { el.style.display = 'none'; el.textContent = ''; return; }
+      el.style.display = '';
+      el.style.color = '#b41e1e';
+      el.textContent = tr(cfg.lang, notifDeliveryState === 'blocked' ? 'notifBlocked' : 'notifUnsupported');
+    }
+
+    // Máquina de estados mínima: la decisión vive en reminderAction (pura,
+    // testeable); el tick solo ejecuta lo que ella dicta. Si toca enfocado u
+    // oculto queda UNO pendiente (sin mover el vencimiento), así nunca se
+    // acumula deuda ni suena una ráfaga al volver; suena cuando el idle lo
+    // permite y el próximo intervalo nace de ESE momento (spec: "plays once
+    // the user becomes idle", "at most one reminder instead of a burst").
     function reminderTick() {
       try {
         const ms = clampReminderSeconds(cfg.reminderSeconds) * 1000;
         const now = Date.now();
-        if (now < reminderNextAt) return;
-        if (!canPlayReminder({ now, lastInteractionAt, hidden: document.hidden })) {
+        const action = reminderAction({
+          now, nextAt: reminderNextAt, hidden: document.hidden,
+          lastInteractionAt, notifEnabled: cfg.reminderNotifEnabled,
+        });
+        if (action === 'none') return;
+        if (action === 'pending') {
           reminderPending = true;
+          return;
+        }
+        if (action === 'notify') {
+          // reminder-desktop-notification: la pestaña está oculta — el canal
+          // es el escritorio. Entregada: el próximo intervalo nace de AHORA
+          // (sin deuda acumulada) y el mismo cue suena junto si el audio está
+          // vivo (playCue degrada en silencio si no). No entregada (sin API o
+          // con error): el comportamiento de antes — queda UNO pendiente — y
+          // el estado queda registrado para que el panel lo diga.
+          const r = notifyReminder(tr(cfg.lang, 'notifTitle'), tr(cfg.lang, 'notifBody'));
+          if (r === 'sent') {
+            playCue('reminder');
+            reminderPending = false;
+            reminderNextAt = Date.now() + ms;
+            notifDeliveryState = null;
+          } else {
+            notifDeliveryState = r;
+            reminderPending = true;
+          }
+          renderNotifStatus();
           return;
         }
         if (now < pendingReturnAt) return;   // gracia tras volver a la pestaña
@@ -1548,27 +1832,34 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
       .adhd-btn svg { width:22px; height:22px; }
 
       /* ===== panel config (anclado al borde, jerarquía header/secciones/footer) ===== */
-      .adhd-panel { position:fixed; z-index:1000; right:0; top:152px; width:280px; box-sizing:border-box; max-width:calc(100vw - 16px); max-height:calc(100vh - 170px); overflow-y:auto; background:#fff; border-radius:16px 0 0 16px; box-shadow:-2px 0 0 #e5e5e5; padding:16px; font-family:duolingo-sans,"Duolingo Sans",sans-serif; }
+      /* duolingo-native-panel-skin: estructura Feather — card con borde 2px,
+         secciones como filas divididas, botones secundarios chunky, labels
+         bold. El acento azul y la sombra dura se mantienen (spec). */
+      .adhd-panel { position:fixed; z-index:1000; right:0; top:152px; width:280px; box-sizing:border-box; max-width:calc(100vw - 16px); max-height:calc(100vh - 170px); overflow-y:auto; background:#fff; border:2px solid #e5e5e5; border-radius:16px 0 0 16px; box-shadow:-2px 0 0 #e5e5e5; padding:16px; font-family:duolingo-sans,"Duolingo Sans",sans-serif; }
       .adhd-head { margin:0 0 10px; }
       .adhd-eyebrow { font-size:10px; font-weight:800; letter-spacing:.12em; color:#1cb0f6; }
-      .adhd-panel h4 { margin:2px 0 0; font-size:15px; color:#0a7ec2; } /* #1cb0f6 fallaba WCAG AA (2.9:1); #0a7ec2 = 5.6:1 */
-      .adhd-panel label { display:block; font-size:13px; color:#4b4b4b; margin:10px 0 4px; }
+      .adhd-panel h4 { margin:2px 0 0; font-size:17px; font-weight:800; color:#0a7ec2; } /* #1cb0f6 fallaba WCAG AA (2.9:1); #0a7ec2 = 5.6:1 */
+      .adhd-panel label { display:block; font-size:13px; font-weight:700; color:#3c3c3c; margin:10px 0 4px; }
       .adhd-panel input[type=range] { width:100%; }
       .adhd-panel .adhd-val { font-weight:700; color:#0a7ec2; }
       /* timer-mode-ux: secciones colapsables + hints */
       .adhd-panel details { margin:10px 0 4px; }
-      .adhd-panel summary { cursor:pointer; font-weight:700; font-size:14px; color:#0a7ec2; padding:6px 8px; border-radius:10px; background:rgba(28,176,246,.08); list-style:none; display:flex; align-items:center; gap:6px; user-select:none; }
+      /* duolingo-native-panel-skin: fila dividida, sin chip teñido */
+      .adhd-panel summary { cursor:pointer; font-weight:700; font-size:15px; color:#0a7ec2; padding:10px 2px; border-bottom:2px solid #e5e5e5; list-style:none; display:flex; align-items:center; gap:6px; user-select:none; }
       .adhd-panel summary::before { content:'▸'; font-size:11px; transition:transform .15s ease; }
       .adhd-panel details[open] summary::before { transform:rotate(90deg); }
       .adhd-panel summary::-webkit-details-marker { display:none; }
       .adhd-sec-ico { width:15px; height:15px; flex:none; }
       .adhd-sec-body { padding:2px 2px 2px 8px; font-size:12px; color:#4b4b4b; }
-      .adhd-foot { margin-top:12px; border-top:1px solid #e5e5e5; padding-top:10px; }
+      .adhd-foot { margin-top:12px; border-top:2px solid #e5e5e5; padding-top:10px; }
       .adhd-panel .adhd-hint { font-size:11px; color:#777; margin:6px 0 2px; line-height:1.35; }
-      /* botones del panel: sombra dura 4px estilo Feather (mismo lenguaje que .adhd-btn) */
-      .adhd-panel button { display:block; width:100%; margin-top:10px; padding:7px; background:#fff; border:2px solid #e5e5e5; border-radius:12px; font:700 13px duolingo-sans,"Duolingo Sans",sans-serif; color:#4b4b4b; cursor:pointer; box-shadow:0 4px 0 #d3d3d3; transition:transform .1s ease, box-shadow .1s ease; }
+      /* duolingo-native-panel-skin: readouts (promedio, "sin datos") salen del inline */
+      .adhd-panel .adhd-readout { font-size:12px; color:#777; margin-top:4px; line-height:1.35; }
+      /* botones del panel: secundario Feather (borde 2px, sombra dura 4px, 15px/700 uppercase) */
+      .adhd-panel button { display:block; width:100%; margin-top:10px; padding:10px; background:#fff; border:2px solid #e5e5e5; border-radius:12px; font:700 15px duolingo-sans,"Duolingo Sans",sans-serif; letter-spacing:.02em; text-transform:uppercase; color:#3c3c3c; cursor:pointer; box-shadow:0 4px 0 #d3d3d3; transition:transform .1s ease, box-shadow .1s ease, background .12s ease; }
+      .adhd-panel button:hover { background:#f7f7f7; }
       .adhd-panel button:active { transform:translateY(4px); box-shadow:0 0 0 #d3d3d3; }
-      .adhd-divider { margin-top:12px; border-top:1px solid #e5e5e5; padding-top:10px; }
+      .adhd-divider { margin-top:12px; border-top:2px solid #e5e5e5; padding-top:10px; }
 
       /* =====================================================================
          arena-timer-overhaul: skins por rung (namespace propio, no toca el
@@ -1672,13 +1963,9 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
         position:absolute; top:0; right:0; width:3px; height:100%; border-radius:2px;
         background:#fff; box-shadow:0 0 8px 2px rgba(255,255,255,.85);
       }
-      /* sliding shine: SOLO tramo activo, con descanso (off en racha/super) */
-      .adhd-shine-wrap { position:absolute; inset:0; overflow:hidden; border-radius:9999px; pointer-events:none; }
-      .adhd-shine {
-        position:absolute; top:0; bottom:0; width:34%;
-        background: linear-gradient(105deg, transparent, rgba(255,255,255,.7), transparent);
-        animation: adhd-sweep2 2400ms cubic-bezier(.4,0,.2,1) infinite;
-      }
+      /* seg-skin-earned-at-close: el sliding shine muere con el tramo dormido —
+         era ambientación pura del activo. Sus reglas se retiran; el keyframe
+         adhd-sweep2 queda (lo usan los sweeps de ::before de peldaño bajo). */
       @keyframes adhd-sweep2 { 0% { transform: translateX(-140%); } 100% { transform: translateX(340%); } }
 
       /* ===== redesign-decay-timeline: riel continuo de depleción =====
@@ -1815,18 +2102,43 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
         100% { box-shadow:0 0 28px 12px rgba(167,139,250,0); }
       }
 
+      /* ===== seg-skin-earned-at-close: el tramo dormido =====
+         Mientras un tramo se LLENA es dormido: tono apagado plano (el matiz
+         nombra al peldaño; la croma no), cero loops ambientales, cero
+         ornamentos. El fondo plano deja que la caída de peldaño transicione
+         nativa — el crossfade de pieles de tramo-fx-round2 ya no corre en el
+         activo (su span sigue existiendo para otros usos y acá también va
+         dormido). El CIERRE quita la clase en el mismo swap que congela: la
+         piel viva ES la recompensa. La opacidad del llenado no se toca: es
+         progreso, no decoración. */
+      .adhd-dormant {
+        background: var(--adhd-dormant, #8a8f98) !important;
+        transition: background-color .32s ease;
+      }
+      .adhd-seg.adhd-dormant::before,
+      .adhd-seg.adhd-dormant::after { content: none !important; }
+      .adhd-seg.adhd-dormant .adhd-sweep,
+      .adhd-seg.adhd-dormant .adhd-flash,
+      .adhd-seg.adhd-dormant .adhd-rung-deco { display: none !important; }
+
       /* ===== animations-panel-setting: kill switch (la info nunca depende de la animación) =====
          Antes era una regla @media (prefers-reduced-motion: reduce). Ahora es
          la clase body.adhd-motion-off, que JS alterna según el nivel del usuario
          y la preferencia del sistema (ver aplicarMotion). Motivo: una sola
          fuente de verdad, así el CSS y el JS no pueden discrepar.
 
-         ALCANCE: SOLO EFECTOS. Las pieles de los peldaños (.adhd-rung-racha /
-         -diamante / -super con su .adhd-ember / .adhd-sparkle / .adhd-shine, y las
-         texturas ::before de los tramos) quedan FUERA a propósito: son material,
-         no animación, y reward-fx solo exige que los EFECTOS tengan variante
-         calmada. Apagarlas sacaba la identidad visual del peldaño ganado, y el
-         usuario no tenía forma de recuperarlas desde el script.
+         ALCANCE (reescrito por seg-skin-earned-at-close): EFECTOS y MOVIMIENTO
+         de piel. La IDENTIDAD es material y sobrevive como frame estático: el
+         color, la composición del degradado y las texturas de los peldaños
+         congelados no se tocan. Lo que muere bajo calma: los efectos y su
+         decoración de apoyo, y desde este change el MOVIMIENTO de las pieles
+         — el flicker de racha, el degradado animado de diamante/super y el
+         glow del legendario colapsan a frame estático, y los ornamentos
+         (embers/sparkles, sweep y flash del legendario, sus franjas blancas)
+         no se renderizan. El split explícito: movimiento y ornamento son
+         motion; color, degradado y textura son material. Antes las pieles
+         enteras quedaban fuera (“material, no animación”) y animaban sus
+         degradados para siempre incluso con motion off.
 
          El barrido de la cabeza del riel (.adhd-rail-head::after) sigue adentro:
          es animación, y era su única señal de vida. El costo perceptual de
@@ -1843,9 +2155,20 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
         body.adhd-motion-off .adhd-part2,
         body.adhd-motion-off .adhd-ring,
         body.adhd-motion-off .adhd-seg.adhd-blink,
-        body.adhd-motion-off .adhd-seg.adhd-legendary {
+        body.adhd-motion-off .adhd-seg.adhd-legendary,
+        body.adhd-motion-off .adhd-rung-racha,
+        body.adhd-motion-off .adhd-rung-diamante,
+        body.adhd-motion-off .adhd-rung-super {
           animation-duration: 1ms !important; animation-iteration-count: 1 !important; animation-delay: 0ms !important;
         }
+        /* seg-skin-earned-at-close: los ornamentos no se RENDERIZAN bajo calma
+           (en el cierre JS ya no los crea — esto cubre el cambio de nivel en
+           caliente sobre tramos congelados con motion permitido). */
+        body.adhd-motion-off .adhd-rung-deco,
+        body.adhd-motion-off .adhd-seg.adhd-legendary .adhd-sweep,
+        body.adhd-motion-off .adhd-seg.adhd-legendary .adhd-flash { display:none !important; }
+        body.adhd-motion-off .adhd-seg.adhd-legendary::before,
+        body.adhd-motion-off .adhd-seg.adhd-legendary::after { display:none !important; }
         body.adhd-motion-off .adhd-part2,
         body.adhd-motion-off .adhd-ring { display:none; }
     `);
@@ -2545,6 +2868,14 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
       if (!cfg.timerShowLabel) return;          // interruptor del panel
       const name = FX_BY_RUNG[rung];
       if (!name) return;                          // peldaños bajos: sin FX
+      // tier-motion-per-seg: el eje por peldaño, JUNTO al reduced que ya
+      // existe (fxOpts sigue decidiendo la presentación calmada; esto no
+      // toca el contrato de resolveMotion ni la clase del body). 'off' =
+      // este peldaño no celebra con canvas — solo el burst de CSS de siempre;
+      // 'reduced' llega al constructor como reduced=true por fxOpts, igual
+      // que antes. Sin reload: cada cierre lee cfg.tierMotionFloor en vivo.
+      const sys = typeof matchMedia === 'function' ? matchMedia(REDUCED_MQ).matches : false;
+      if (tierMotionFor({ level: cfg.motionLevel, reduce: sys, rung, floor: cfg.tierMotionFloor }) === 'off') return;
       const now = Date.now();
       if (now - (fxLastFire[name] || 0) < FX_MIN_GAP_MS) return;
       fxLastFire[name] = now;
@@ -2742,36 +3073,31 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
     // Skin del tramo activo = rung proyectado. Caída de peldaño → flash de pérdida.
     const RUNG_CLASSES = RUNGS.map(r => 'adhd-rung-' + r.id);
 
-    // tramo-fx-round2 (D2): CSS no interpola background-image — al cambiar de
-    // peldaño, el skin ANTERIOR vive 320ms encima y fadea (degradado real, no
-    // swap instantáneo). Máx 1 vivo, mismo patrón idempotente del flash.
-    function crossFadeRung(segEl, prevCls) {
-      if (segEl.querySelector('.adhd-rung-prev')) return;
-      const s = document.createElement('span');
-      s.className = 'adhd-rung-prev ' + prevCls;
-      s.setAttribute('aria-hidden', 'true');
-      segEl.appendChild(s);
-      setTimeout(() => s.remove(), 340);
-    }
-
     function applyProjectedRung(segEl, projected, frac) {
       const cls = rungClass(projected);
       if (cls && !segEl.classList.contains(cls)) {
-        const prevCls = lastProjectedRung !== null ? rungClass(lastProjectedRung) : null;
         segEl.classList.remove('adhd-rarity-verde', 'adhd-blink', ...RUNG_CLASSES);
         segEl.classList.add(cls);
-        if (prevCls && prevCls !== cls) crossFadeRung(segEl, prevCls);
         // Bajar de peldaño dentro del mismo tramo (la vuelta se recargó) es un
-        // escalón, no una pérdida: solo el crossfade de skin lo marca.
+        // escalón, no una pérdida: el flash rojo lo marca y el tono dormido
+        // transiciona nativo (el crossfade de pieles de tramo-fx-round2 ya no
+        // corre acá: el activo es plano, no degradado).
         if (lastProjectedRung !== null && projected < lastProjectedRung) {
           flashLoss(segEl);
         }
         lastProjectedRung = projected;
-        // 6.4 feedback: las decoraciones vivas (embers/sparkles) también viven en el
-        // tramo ACTIVO, no solo en el congelado — si no, el tramo que más tiempo se
-        // ve es el más quieto. Se refrescan por peldaño en cada cambio de clase.
+        // seg-skin-earned-at-close (reversión del 6.4): el tramo activo es a
+        // propósito lo más quieto de la barra — el silencio mientras llena es
+        // lo que hace que el cierre se lea como ignición. Decoraciones heredadas
+        // fuera: el tono dormido nombra al peldaño sin encenderlo.
         segEl.querySelectorAll('.adhd-rung-deco').forEach(d => d.remove());
-        addRungDecorations(segEl, projected);
+      }
+      // seg-skin-earned-at-close: el tramo que llena es dormido — el matiz
+      // apagado del peldaño proyectado, plano y quieto hasta el cierre.
+      segEl.classList.add('adhd-dormant');
+      const tone = dormantTone(RUNGS[projected].from);
+      if (tone && segEl.style.getPropertyValue('--adhd-dormant') !== tone) {
+        segEl.style.setProperty('--adhd-dormant', tone);
       }
       // Urgencia por presupuesto quemado (no por avance visual): frac > 0.8
       segEl.classList.toggle('adhd-blink-hard', frac > 0.8 && frac < 1);
@@ -2815,8 +3141,10 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
       }
     }
 
-    // Efectos del tramo ACTIVO: leading edge siempre; sliding shine salvo racha/super.
-    function ensureActiveFx(segEl, projected) {
+    // Efectos del tramo ACTIVO: leading edge siempre (el frente del llenado).
+    // seg-skin-earned-at-close: el sliding shine muere — ambientación pura en
+    // un tramo que ahora es dormido por diseño.
+    function ensureActiveFx(segEl) {
       // leading edge: sólo si hay llenado visible y no existe
       if (!segEl.querySelector('.adhd-edge')) {
         const edge = document.createElement('span');
@@ -2826,21 +3154,6 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
       }
       const edge = segEl.querySelector('.adhd-edge');
       if (edge) edge.style.opacity = (parseFloat(segEl.style.width) > 1) ? '1' : '0';
-
-      // sliding shine: SOLO tramo activo, off en racha/super (compite con flicker/gradiente)
-      const wantShine = projected !== 3 && projected !== 5;
-      if (wantShine && !segEl.querySelector('.adhd-shine-wrap')) {
-        const wrap = document.createElement('span');
-        wrap.className = 'adhd-shine-wrap';
-        wrap.setAttribute('aria-hidden', 'true');
-        const s = document.createElement('i');
-        s.className = 'adhd-shine';
-        wrap.appendChild(s);
-        segEl.appendChild(wrap);
-      } else if (!wantShine) {
-        const wrap = segEl.querySelector('.adhd-shine-wrap');
-        if (wrap) wrap.remove();
-      }
     }
 
     function clearActiveFx(segEl) {
@@ -2937,9 +3250,18 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
         // vida (D1) y los sweeps viven SOLO acá; el registro congelado no parpadea.
         seg.classList.toggle('adhd-active', i === curIdx);
 
-        // Tramo legendario (último, sin timer) mantiene su animación
+        // seg-skin-earned-at-close: el legendario (solo existe en modo barra)
+        // también duerme mientras llena — su gradiente épico, glow y sparkles
+        // se encienden cuando cierra (la barra al 100%: curIdx pasa a T o el
+        // tramo queda lleno). El CSS anima solo lo que la clase dormida no calla.
         if (seg.classList.contains('adhd-legendary')) {
-          // Nada que hacer, el CSS anima solo
+          const full = segProgress(pct, i, T) >= segLength(T) - 1e-9;
+          const dormLegacy = i === curIdx && !full;
+          seg.classList.toggle('adhd-dormant', dormLegacy);
+          if (dormLegacy) {
+            const tone = dormantTone(LEGENDARY_ANCHOR);
+            if (tone) seg.style.setProperty('--adhd-dormant', tone);
+          }
           return;
         }
 
@@ -2947,9 +3269,15 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
         if (!cfg.timerMode) {
           seg.style.boxShadow = i < curIdx ? '0 0 6px rgba(255,255,255,.35)' : 'none';
           if (i === curIdx) {
+            // seg-skin-earned-at-close: el activo posicional duerme igual — el
+            // matiz apagado de su rareza hasta que la frontera lo pasa.
+            seg.classList.add('adhd-dormant');
+            const tone = dormantTone(levelColor(i, T) || LEGENDARY_ANCHOR);
+            if (tone) seg.style.setProperty('--adhd-dormant', tone);
             const done = Math.min(1, segDone / segLen);
             seg.style.opacity = String(0.25 + 0.75 * done);
           } else {
+            seg.classList.remove('adhd-dormant');
             seg.style.opacity = '1';
           }
           return;
@@ -2961,11 +3289,16 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
         if (rarity !== undefined) {
           // Tramo cerrado: congela el rung ganado (la barra es un registro).
           // Swap quirúrgico — nunca className full-replace (timer-mode-ux 1.1)
+          // seg-skin-earned-at-close: el MISMO swap que congela es la ignición —
+          // el dormido se va con la clase y la piel viva entra, sin frame de
+          // residuo dormido sobre un tramo cerrado.
           const frozenCls = rungClass(rarity);
           if (!seg.classList.contains(frozenCls)) {
-            seg.classList.remove('adhd-blink', 'adhd-blink-hard', 'adhd-rarity-verde', ...RUNG_CLASSES);
+            seg.classList.remove('adhd-blink', 'adhd-blink-hard', 'adhd-rarity-verde', 'adhd-dormant', ...RUNG_CLASSES);
             seg.classList.add(frozenCls);
-            addRungDecorations(seg, rarity);
+            // Bajo calma no se crean ornamentos (spec seg-reward-skin R3): el
+            // kill switch apaga los que hubiera dejado un nivel anterior.
+            if (!motionOff()) addRungDecorations(seg, rarity);
           }
           seg.style.opacity = '1';
           seg.style.boxShadow = '0 0 6px rgba(255,255,255,.35)';
@@ -2979,7 +3312,7 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
             const L = currentLadder(Date.now() - raceStartTime);
             if (L) {
               applyProjectedRung(seg, L.tier, L.frac);
-              ensureActiveFx(seg, L.tier);
+              ensureActiveFx(seg);
             }
           } else {
             seg.classList.remove('adhd-blink', 'adhd-blink-hard');
@@ -3022,11 +3355,11 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
               const segEl = overlay.querySelector(`.adhd-seg[data-seg="${tramoIdx}"]`);
               if (segEl) {
                 const frozenCls = rungClass(result.rung);
-                segEl.classList.remove('adhd-active', 'adhd-blink', 'adhd-blink-hard', 'adhd-rarity-verde', ...RUNG_CLASSES);
+                segEl.classList.remove('adhd-active', 'adhd-blink', 'adhd-blink-hard', 'adhd-rarity-verde', 'adhd-dormant', ...RUNG_CLASSES);
                 segEl.classList.add(frozenCls);
                 segEl.style.opacity = '1';
                 clearActiveFx(segEl);
-                addRungDecorations(segEl, result.rung);
+                if (!motionOff()) addRungDecorations(segEl, result.rung);
               }
 
               // Partículas escaladas + reward fx: siempre hay peldaño (el piso es
@@ -3086,11 +3419,11 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
             const lastSegEl = overlay.querySelector(`.adhd-seg[data-seg="${lastSegIdx}"]`);
             if (lastSegEl) {
               const frozenCls = rungClass(result.rung);
-              lastSegEl.classList.remove('adhd-active', 'adhd-blink', 'adhd-blink-hard', 'adhd-rarity-verde', ...RUNG_CLASSES);
+              lastSegEl.classList.remove('adhd-active', 'adhd-blink', 'adhd-blink-hard', 'adhd-rarity-verde', 'adhd-dormant', ...RUNG_CLASSES);
               lastSegEl.classList.add(frozenCls);
               lastSegEl.style.opacity = '1';
               clearActiveFx(lastSegEl);
-              addRungDecorations(lastSegEl, result.rung);
+              if (!motionOff()) addRungDecorations(lastSegEl, result.rung);
             }
             {
               burstRung(result.rung, cx, result.rung === 5); // Super cierra con doble oleada
@@ -3181,7 +3514,7 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
             <label><input type="checkbox" id="adhd-timer-label" ${cfg.timerShowLabel ? 'checked' : ''}> ${tr(cfg.lang, 'lblTimerLabel')}</label>
             <button id="adhd-test-fx">${tr(cfg.lang, 'btnTestFx')}</button>
             <div class="adhd-hint">${tr(cfg.lang, 'hintTimerGoal')}</div>
-            <div style="font-size:11px;color:#666;margin-top:4px;">${isEn ? 'Avg' : 'Promedio'}: ${avgDisplay}</div>
+            <div class="adhd-readout">${isEn ? 'Avg' : 'Promedio'}: ${avgDisplay}</div>
           </div>
           <label for="adhd-motion">${tr(cfg.lang, 'lblMotion')}</label>
           <select id="adhd-motion">
@@ -3191,6 +3524,14 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
           </select>
           <div class="adhd-hint">${tr(cfg.lang, 'hintMotion')}</div>
           ${motionAskedBySystem() ? `<div class="adhd-hint" id="adhd-motion-system-hint">${tr(cfg.lang, 'hintMotionSystem')}</div>` : ''}
+          <label for="adhd-tier-motion">${tr(cfg.lang, 'lblTierMotion')}</label>
+          <select id="adhd-tier-motion">
+            <option value="3"${cfg.tierMotionFloor === 3 ? ' selected' : ''}>${tr(cfg.lang, 'tierMotionRacha')}</option>
+            <option value="4"${cfg.tierMotionFloor === 4 ? ' selected' : ''}>${tr(cfg.lang, 'tierMotionDiamante')}</option>
+            <option value="5"${cfg.tierMotionFloor === 5 ? ' selected' : ''}>${tr(cfg.lang, 'tierMotionSuper')}</option>
+            <option value="6"${cfg.tierMotionFloor === 6 ? ' selected' : ''}>${tr(cfg.lang, 'tierMotionNone')}</option>
+          </select>
+          <div class="adhd-hint">${tr(cfg.lang, 'hintTierMotion')}</div>
           </div>
         </details>
       `;
@@ -3208,6 +3549,9 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
           <div class="adhd-hint">${tr(cfg.lang, 'hintSoundCues')}</div>
           <label><input type="checkbox" id="adhd-reminder" ${cfg.reminderEnabled ? 'checked' : ''}> ${tr(cfg.lang, 'lblReminder')}</label>
           <div class="adhd-hint">${tr(cfg.lang, 'hintReminder')}</div>
+          <label><input type="checkbox" id="adhd-reminder-notif" ${cfg.reminderNotifEnabled ? 'checked' : ''}> ${tr(cfg.lang, 'lblReminderNotif')}</label>
+          <div class="adhd-hint">${tr(cfg.lang, 'hintReminderNotif')}</div>
+          <div class="adhd-hint" id="adhd-reminder-notif-status" style="display:none;"></div>
           <label for="adhd-reminder-secs">${tr(cfg.lang, 'lblReminderInterval')}: <span class="adhd-val" id="adhd-reminder-secs-val">${formatIntervalLabel(cfg.reminderSeconds)}</span></label>
           <input type="range" id="adhd-reminder-secs" min="${REMINDER_MIN_SECONDS}" max="${REMINDER_MAX_SECONDS}" step="15" value="${clampReminderSeconds(cfg.reminderSeconds)}" aria-label="${tr(cfg.lang, 'lblReminderInterval')}">
           <button id="adhd-test-sound">${tr(cfg.lang, 'btnTestSound')}</button>
@@ -3237,7 +3581,7 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
           <div>${tr(cfg.lang, 'jrTotal')}: <strong>${journal.totalLessons}</strong></div>
         `;
       } else {
-        html += `<div style="color:#999;">${tr(cfg.lang, 'jrNoData')}</div>`;
+        html += `<div class="adhd-readout">${tr(cfg.lang, 'jrNoData')}</div>`;
       }
       html += `</div></div></details>`;
 
@@ -3295,6 +3639,20 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
         aplicarMotion();
       });
 
+      // tier-motion-per-seg: el eje por peldaño persiste igual que el nivel.
+      // Sin reload y sin tocar instancias: el próximo cierre lee cfg en vivo,
+      // y el `reduced` congelado en cada constructor no depende del piso.
+      panel.querySelector('#adhd-tier-motion').addEventListener('change', (e) => {
+        const v = parseInt(e.target.value, 10);
+        // Basura editada a mano no se persiste: el fallback del 1.4
+        // (clampTierMotionFloor) es el único juez de qué es un piso válido.
+        if (clampTierMotionFloor(v) !== v) {
+          e.target.value = String(clampTierMotionFloor(cfg.tierMotionFloor));
+          return;
+        }
+        setCfg('tierMotionFloor', v);
+      });
+
       // audio-cues: los dos toggles y el intervalo persisten via setCfg(); el
       // intervalo reinicia el scheduler para que el proximo vencimiento salga
       // del valor nuevo sin recargar la pagina.
@@ -3305,6 +3663,14 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
         setCfg('reminderEnabled', e.target.checked);
         syncReminder();
       });
+      // reminder-desktop-notification: el toggle del canal de escritorio.
+      // Sin syncReminder: el tick lee cfg en vivo, no hay ciclo de vida que
+      // reiniciar (spec: el cambio aplica sin recargar).
+      panel.querySelector('#adhd-reminder-notif').addEventListener('change', (e) => {
+        setCfg('reminderNotifEnabled', e.target.checked);
+      });
+      // El panel pinta el estado del último intento tal como esté.
+      renderNotifStatus();
       const reminderSecs = panel.querySelector('#adhd-reminder-secs');
       reminderSecs.addEventListener('input', () => {
         panel.querySelector('#adhd-reminder-secs-val').textContent = formatIntervalLabel(reminderSecs.value);
@@ -3332,6 +3698,11 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
           setTimeout(() => playRewardFx(r), r * 1400 + 180);
         }
         setTimeout(() => { // escalón a la baja dentro del tramo: crossfade + flash
+          // El guard del click queda viejo a esta altura: 8,4 s de timers
+          // después, la navegación (watchPath) pudo haber destruido el overlay.
+          // Sin este re-chequeo, un click + navegación rápida revienta el
+          // callback con TypeError (lo expuso la ruta tier5 del e2e).
+          if (!overlay) return;
           const seg = overlay.querySelector('.adhd-seg.adhd-active') || overlay.querySelector('.adhd-seg');
           if (!seg || seg.querySelector('.adhd-rung-prev')) return;
           const s = document.createElement('span');

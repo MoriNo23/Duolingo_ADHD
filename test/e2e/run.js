@@ -31,9 +31,18 @@ const ROUTES = [
   { path: '/lesson/', expectLesson: true, kind: 'animated' },
   { path: '/lesson/calm-system/', expectLesson: true, kind: 'calm' },
   { path: '/lesson/calm-never/', expectLesson: true, kind: 'calm' },
+  // tier-motion-per-seg: motion permitido con el piso en 5 — solo Super
+  // celebra con canvas. Las aserciones genéricas por peldaño no aplican (dos
+  // de los tres efectos no deben existir): las suyas van aparte, en main.
+  { path: '/lesson/tier5/', expectLesson: true, kind: 'animated', tierAxis: true },
   // Ruta aparte para el fin de vida real: el cambio de pathname destruye el riel,
   // asi que mezclarlo con el recorrido de vueltas no puede dar una lectura clara.
   { path: '/lesson/navonly/', expectLesson: true, kind: 'animated', navOnly: true },
+  // seg-skin-earned-at-close: rutas dedicadas al ciclo dormido->ignicion. El
+  // fixture corre SOLO la sonda del ciclo (cruce real de barra via
+  // aria-valuenow); las fases de vueltas/efectos no aplican (skipPhases).
+  { path: '/lesson/dormant/', expectLesson: true, kind: 'animated', dormantOnly: true },
+  { path: '/lesson/dormant-calm-system/', expectLesson: true, kind: 'calm', dormantOnly: true },
   { path: '/not-a-lesson/x', expectLesson: false, kind: 'none' },
 ];
 
@@ -90,21 +99,15 @@ function serve() {
 // lesson-bar-detection.
 function buildFixture(pathname) {
   const published = fs.readFileSync(PUBLISHED, 'utf8');
-  // add-field-qa-loop: el companion de QA se inyecta en su propio slot. Si
-  // todavía no existe, se inyecta vacío: el chequeo del companion da RED en
-  // vez de romper el armado del fixture.
-  const COMPANION = path.join(ROOT, 'qa', 'adhd-qa-helper.user.js');
-  const companion = fs.existsSync(COMPANION) ? fs.readFileSync(COMPANION, 'utf8') : '';
   // Reemplazo GLOBAL: __GOAL__ aparece mas de una vez en el fixture y
   // String.replace con patron de string solo cambia la primera (la segunda queda
   // como identificador y revienta con ReferenceError en el fixture).
   // Las funciones de reemplazo evitan que $& / $1 del contenido se interpreten.
   const script = fs.readFileSync(FIXTURE, 'utf8')
     .replace(/\/\*__SCRIPT__\*\//g, () => published)
-    .replace(/\/\*__QA_SCRIPT__\*\//g, () => companion)
     .replace(/__PATHNAME__/g, () => pathname)
     .replace(/__GOAL__/g, () => String(GOAL_SEC));
-  if (/__(GOAL|PATHNAME)__/.test(script) || script.includes('__SCRIPT__') || script.includes('__QA_SCRIPT__')) {
+  if (/__(GOAL|PATHNAME)__/.test(script) || script.includes('__SCRIPT__')) {
     throw new Error('el fixture quedo con un marcador sin reemplazar: revisa buildFixture()');
   }
   return script;
@@ -142,7 +145,10 @@ function assert(results, name, cond, detail) {
   results.push({ name, pass: !!cond, detail: detail === undefined ? '' : String(detail) });
 }
 
-function checkReport(rep, results, { expectLesson, kind = 'none', navOnly = false }) {
+function checkReport(rep, results, { expectLesson, kind = 'none', navOnly = false, tierAxis = false, dormantOnly = false }) {
+  // seg-skin-earned-at-close: las rutas dormant corren una sola fase propia
+  // (la sonda del ciclo) y quedan exentas de las aserciones por fase.
+  const skipPhases = navOnly || dormantOnly;
   if (!rep || rep.parseError) {
     assert(results, 'el fixture produjo un reporte', false,
       rep ? 'JSON ilegible: ' + rep.parseError : 'no se encontro el <pre id="adhd-e2e-report">');
@@ -161,11 +167,13 @@ function checkReport(rep, results, { expectLesson, kind = 'none', navOnly = fals
   // Corre en TODAS las rutas (con y sin barra de leccion) porque el recordatorio
   // y los controles no dependen de la leccion.
   const snd = rep.sound || {};
-  assert(results, 'la seccion SONIDO del panel tiene sus 4 controles',
+  assert(results, 'la seccion SONIDO del panel tiene sus 5 controles (incluido el de notificación)',
     snd.present === true, JSON.stringify(snd).slice(0, 400));
   assert(results, 'los dos sonidos arrancan encendidos (defaults)',
     snd.cuesChecked === true && snd.reminderChecked === true,
     'soundCues=' + snd.cuesChecked + ' reminder=' + snd.reminderChecked);
+  assert(results, 'la notificación de escritorio arranca encendida (default)',
+    snd.notifChecked === true, 'notif=' + snd.notifChecked);
   assert(results, 'el intervalo arranca en 60s y dentro del rango soportado',
     snd.range === '60' && snd.rangeMin === '15' && snd.rangeMax === '900',
     'range=' + snd.range + ' [' + snd.rangeMin + '..' + snd.rangeMax + ']');
@@ -180,6 +188,9 @@ function checkReport(rep, results, { expectLesson, kind = 'none', navOnly = fals
   assert(results, 'el toggle del recordatorio persiste en los dos sentidos',
     snd.storedReminderOff === false && snd.storedReminderOn === true,
     'off=' + snd.storedReminderOff + ' on=' + snd.storedReminderOn);
+  assert(results, 'el toggle de notificación de escritorio persiste en los dos sentidos',
+    snd.storedNotifOff === false && snd.storedNotifOn === true,
+    'off=' + snd.storedNotifOff + ' on=' + snd.storedNotifOn);
   assert(results, 'el boton de prueba de sonido no rompe nada',
     snd.testBtnErrors === 0, 'errores=' + snd.testBtnErrors);
   assert(results, 'el panel queda cerrado para el resto de la corrida',
@@ -201,24 +212,18 @@ function checkReport(rep, results, { expectLesson, kind = 'none', navOnly = fals
       ri.secondAfterInterval === 1, 'cues=' + ri.secondAfterInterval);
     assert(results, 'con la pestaña oculta no suena nada',
       ri.whileHidden === 0, 'cues=' + ri.whileHidden);
+    // reminder-desktop-notification: oculto+vencido escala al canal de
+    // escritorio; el intento fallido queda dicho en el panel (fallar visible).
+    assert(results, 'la pestaña oculta intentó el canal de escritorio',
+      ri.notifAttempts >= 1, 'intentos=' + ri.notifAttempts);
+    assert(results, 'el panel dice que la notificación no se entregó (fallar visible)',
+      ri.notifStatusShown === true,
+      'mostrado=' + ri.notifStatusShown + ' texto=' + String(ri.notifStatusText || '').slice(0, 60));
     assert(results, 'volver y ponerse a trabajar pospone el recordatorio',
       ri.backToWork === 0, 'cues=' + ri.backToWork);
     assert(results, 'al volver y quedarse idle: UN cue, sin ráfaga',
       ri.idleAfterReturn === 1, 'cues=' + ri.idleAfterReturn);
   }
-
-  // --- add-field-qa-loop: el companion de QA captura el diagnóstico de campo.
-  const qa = rep.qa || {};
-  assert(results, 'el companion de QA está instalado (botón adhd-qa)',
-    qa.present === true, 'present=' + qa.present);
-  assert(results, 'Copiar diagnóstico del companion suelta el bloque observable',
-    qa.copioAlgo === true && qa.tieneErrores === true && qa.tienePath === true
-      && qa.tieneMotion === true && qa.tieneArtefactos === true && qa.noAdivinaVersion === true,
-    'copio=' + qa.copioAlgo + ' errores=' + qa.tieneErrores + ' path=' + qa.tienePath
-      + ' motion=' + qa.tieneMotion + ' artefactos=' + qa.tieneArtefactos
-      + ' noVersion=' + qa.noAdivinaVersion);
-  assert(results, 'un error de runtime termina en el diagnóstico del companion',
-    qa.capturaElError === true, 'capturado=' + qa.capturaElError);
 
   if (expectLesson) {
     assert(results, 'la barra de leccion se detecta', rep.barFound === true);
@@ -243,30 +248,30 @@ function checkReport(rep, results, { expectLesson, kind = 'none', navOnly = fals
       rep.railTitle);
     // audio-cues: segunda pulsación del botón de prueba, con la muestra embebida
     // ya decodificada (la primera le tocó al sintetizador: el decode es async).
-    if (!navOnly) assert(results, 'la muestra decodificada suena sin errores',
+    if (!skipPhases) assert(results, 'la muestra decodificada suena sin errores',
       rep.soundSamplePresent === true && rep.soundSampleErrors === 0,
       'present=' + rep.soundSamplePresent + ' errores=' + rep.soundSampleErrors);
 
     // --- el reloj de la escalera, la parte que fallo dos veces ---
-    const l = navOnly ? [] : (rep.laps || []);
+    const l = skipPhases ? [] : (rep.laps || []);
     const first = l[0] || {}, second = l[1] || {}, deep = l[l.length - 1] || {};
-    if (!navOnly) assert(results, 'dentro de una vuelta el material del fill NO cambia',
+    if (!skipPhases) assert(results, 'dentro de una vuelta el material del fill NO cambia',
       Array.isArray(first.materials) && first.materials.every((m) => m === first.materials[0]),
       JSON.stringify(first.materials));
-    if (!navOnly) assert(results, 'dentro de una vuelta la etiqueta NO cambia',
+    if (!skipPhases) assert(results, 'dentro de una vuelta la etiqueta NO cambia',
       Array.isArray(first.labels) && first.labels.every((x) => x === first.labels[0]),
       JSON.stringify(first.labels));
-    if (!navOnly) assert(results, 'la recarga baja EXACTAMENTE un peldaño',
+    if (!skipPhases) assert(results, 'la recarga baja EXACTAMENTE un peldaño',
       typeof second.label === 'string' && typeof first.label === 'string' &&
       second.label !== first.label,
       first.label + ' -> ' + second.label);
-    if (!navOnly) assert(results, 'el piso es MADERA y no se agota',
+    if (!skipPhases) assert(results, 'el piso es MADERA y no se agota',
       deep.label === 'MADERA' && deep.lost === false,
       'laps=' + l.length + ' label=' + deep.label);
-    if (!navOnly) assert(results, 'nunca aparece un estado de derrota en ninguna vuelta',
+    if (!skipPhases) assert(results, 'nunca aparece un estado de derrota en ninguna vuelta',
       l.every((x) => x.label !== 'PERDIDO' && x.lost === false && !/perdido|afafaf/i.test(x.material || '')),
       JSON.stringify(l.map((x) => x.label)));
-    if (!navOnly) assert(results, 'el marcador de vuelta sigue contando en el piso',
+    if (!skipPhases) assert(results, 'el marcador de vuelta sigue contando en el piso',
       typeof deep.lapMark === 'number' && deep.lapMark >= 6, 'lapMark=' + deep.lapMark);
 
     // --- fix-crono-contrast: el contador se lee en cada peldaño y en urgente ---
@@ -274,7 +279,7 @@ function checkReport(rep, results, { expectLesson, kind = 'none', navOnly = fals
     // CSSOM) con su propia formula WCAG, independiente de la implementacion del
     // script. No se usa getComputedStyle: las transiciones CSS no avanzan de forma
     // determinista bajo el tiempo virtual del arnes (ver fixture.html, snap()).
-    if (!navOnly) {
+    if (!skipPhases) {
       const parse = (s) => {
         const m = String(s).match(/rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)/);
         return m ? { r: +m[1], g: +m[2], b: +m[3], a: m[4] === undefined ? 1 : +m[4] } : null;
@@ -322,7 +327,7 @@ function checkReport(rep, results, { expectLesson, kind = 'none', navOnly = fals
     // y el efecto tiene que seguir: si un frame no se puede dibujar, la
     // excepcion no lo puede matar.
     // En la ruta navonly no se corre la fase de efectos: solo el fin de vida.
-    if (!navOnly) {
+    if (!skipPhases) {
     const stale = Array.isArray(rep.fxStaleFrame) ? rep.fxStaleFrame : [];
     for (const tier of ['racha', 'diamante', 'super']) {
       const s = stale.find((x) => x.name === tier) || {};
@@ -345,6 +350,10 @@ function checkReport(rep, results, { expectLesson, kind = 'none', navOnly = fals
     // leccion (que Duolingo hace al responder) NO puede matar un efecto en vuelo.
     assert(results, 'el harness re-rendro la barra con un efecto en pantalla',
       rep.fxBarSwapOk === true, 'swap=' + rep.fxBarSwapOk);
+    // tier-motion-per-seg: en la ruta del eje solo un canvas enciende, así que
+    // los asserts genéricos por peldaño (que exigen los tres) no aplican —
+    // los suyos viven en main, con el conteo exacto.
+    if (!tierAxis) {
     for (const tier of ['racha', 'diamante', 'super']) {
       const f = fx.find((x) => x.tier === tier) || {};
       const enVuelo = tier === rep.fxBarSwapTier;
@@ -360,6 +369,7 @@ function checkReport(rep, results, { expectLesson, kind = 'none', navOnly = fals
       }
     }
     }
+    }
     // Y el otro lado: un fin de vida real (cambio de path) tiene que seguir
     // limpiando, o la suite se podria satisfacer con "nunca destruyo nada".
     if (navOnly) {
@@ -367,8 +377,11 @@ function checkReport(rep, results, { expectLesson, kind = 'none', navOnly = fals
         rep.navBeforeCanvases >= 1 && rep.navAfterCanvases === 0,
         'antes=' + rep.navBeforeCanvases + ' despues=' + rep.navAfterCanvases + ' path=' + rep.navPath + ' btn=' + rep.navBtn + ' crono=' + rep.navCrono + ' rail=' + rep.navRail);
     }
-    if (!navOnly) {
+    if (!skipPhases) {
       const fx2 = Array.isArray(rep.fx) ? rep.fx : [];
+      // tier-motion-per-seg: la ruta del eje no pasa por los tres peldaños
+      // genéricos — dos de ellos no deben existir. Sus asserts viven en main.
+      if (!tierAxis) {
       for (const tier of ['racha', 'diamante', 'super']) {
         const f = fx2.find((x) => x.tier === tier) || {};
         // "¿Se movio la figura?": fraccion de la mascara que cambio entre el
@@ -384,6 +397,7 @@ function checkReport(rep, results, { expectLesson, kind = 'none', navOnly = fals
             f.steadyFrames >= 3 && f.shapeChange <= 0.02,
             'cambio de forma=' + f.shapeChange);
         }
+      }
       }
     }
   } else {
@@ -422,6 +436,50 @@ function compareCalmVsAnimated(animated, calm, results, label) {
   }
 }
 
+// calm-canvas-grayscale: la variante calmada es GRIS y cada peldaño tiene el
+// SUYO. Se mide sobre los pixeles realmente pintados (toneOf en el fixture),
+// no sobre constantes del codigo: (a) casi todo lo pintado es neutro y (b) la
+// luminancia media difiere entre peldaños. Umbrales modestos a proposito: el
+// render real tiene antialiasing y este archivo no se corre en local para
+// calibrar; lo estricto (>=1.5:1 entre valores del ramp) ya lo cubre el core.
+// Lo que no puede pasar es un efecto todavia a color (neutralidad por el
+// piso) ni tres peldaños indistinguibles (separacion).
+function checkCalmGrey(calm, results, label) {
+  const c = (calm && calm.fx) || [];
+  const porPeldaño = {};
+  for (const tier of ['racha', 'diamante', 'super']) {
+    porPeldaño[tier] = c.find((x) => x.tier === tier) || {};
+  }
+  const conDatos = ['racha', 'diamante', 'super'].filter((t) => {
+    const f = porPeldaño[t];
+    return f && f.greyFrac !== null && f.greyFrac !== undefined && f.greyLum !== null && f.greyLum !== undefined;
+  });
+  for (const tier of ['racha', 'diamante', 'super']) {
+    const f = porPeldaño[tier];
+    const gf = f.greyFrac;
+    assert(results, `la calma de ${tier} pinta en gris, no a color (${label})`,
+      gf !== null && gf !== undefined && gf >= 0.8,
+      'gris=' + (gf === null || gf === undefined ? 'sin datos' : (gf * 100).toFixed(0) + '%'));
+  }
+  // Separacion entre peldaños: si dos medias caen una encima de la otra, el
+  // ramp colapso en la practica aunque la tabla este bien.
+  if (conDatos.length === 3) {
+    const lums = conDatos.map((t) => porPeldaño[t].greyLum);
+    let minSep = Infinity;
+    for (let i = 0; i < lums.length; i++) {
+      for (let j = i + 1; j < lums.length; j++) {
+        minSep = Math.min(minSep, Math.abs(lums[i] - lums[j]));
+      }
+    }
+    assert(results, `los tres grises calmados se distinguen entre si (${label})`,
+      minSep >= 0.05,
+      'lums=' + lums.map((l) => l.toFixed(3)).join('/') + ' sepMin=' + minSep.toFixed(3));
+  } else {
+    assert(results, `los tres peldaños calmados tienen lectura de tono (${label})`, false,
+      'con datos=' + conDatos.join(','));
+  }
+}
+
 // ---------- main ----------
 async function main() {
   const bin = findBrowser();
@@ -446,6 +504,69 @@ async function main() {
     }
     compareCalmVsAnimated(reports['/lesson/'], reports['/lesson/calm-system/'], results, 'reduce del sistema');
     compareCalmVsAnimated(reports['/lesson/'], reports['/lesson/calm-never/'], results, 'nivel never');
+    // calm-canvas-grayscale: en las rutas calmadas, lo pintado es gris y cada
+    // peldaño tiene el suyo. Solo aca: en la ruta animada el color es lo correcto.
+    checkCalmGrey(reports['/lesson/calm-system/'], results, 'reduce del sistema');
+    checkCalmGrey(reports['/lesson/calm-never/'], results, 'nivel never');
+
+    // tier-motion-per-seg: el eje por peldaño en vivo. Con el piso en 5 y el
+    // movimiento permitido, solo Super enciende canvas — Racha y Diamante no
+    // aparecen (el wiring corta antes de construir) y el único que enciende SE
+    // MUEVE: la animación queda como la marca de lo ganado. El patrón de
+    // medición es el de siempre: cambio de forma en la meseta, no conteo de
+    // nodos.
+    const t5 = reports['/lesson/tier5/'];
+    const t5fx = (t5 && Array.isArray(t5.fx)) ? t5.fx : [];
+    assert(results, 'con el piso en 5 solo Super enciende canvas (racha y diamante quedan afuera)',
+      t5fx.length === 1,
+      'efectos=' + t5fx.length + ' [' + t5fx.map((x) => x.tier).join(',') + ']');
+    assert(results, 'y el único canvas que enciende se mueve (la recompensa sigue viva)',
+      t5fx.length === 1 && t5fx[0].steadyFrames >= 3 && t5fx[0].shapeChange >= 0.1,
+      'cambio de forma=' + (t5fx[0] && t5fx[0].shapeChange));
+    assert(results, 'la ruta animada de siempre sigue encendiendo los tres',
+      ((reports['/lesson/'] && reports['/lesson/'].fx) || []).length === 3,
+      'efectos=' + ((reports['/lesson/'] && reports['/lesson/'].fx) || []).length);
+    // Precedencia en vivo: calm-never lleva el piso sembrado en 5 y los tres
+    // efectos calmados siguen presentes e idénticos — el eje es inerte bajo
+    // calma (spec motion-preference: "observably inert").
+    const cn = reports['/lesson/calm-never/'];
+    const cnfx = (cn && Array.isArray(cn.fx)) ? cn.fx : [];
+    assert(results, 'bajo calma el piso es inerte: los tres efectos calmados siguen presentes',
+      cn.tierFloorSeeded === 5 && cnfx.length === 3,
+      'efectos=' + cnfx.length + ' pisoSembrado=' + cn.tierFloorSeeded);
+    // seg-skin-earned-at-close: dormido mientras llena, ignición al cerrar.
+    // Ruta animada: el activo es plano y quieto; el cierre en Super enciende la
+    // piel (gradiente + sparkles); el siguiente tramo vuelve a dormir.
+    const dm = reports['/lesson/dormant/'] || {};
+    const dp = dm.dormant || {};
+    assert(results, 'mientras llena: el tramo activo es dormido (clase + tono)',
+      !!dp.earlyActive && dp.earlyActive.dormant === true && !!dp.earlyActive.toneVar,
+      'dormido=' + (dp.earlyActive && dp.earlyActive.dormant) + ' tono=' + (dp.earlyActive && dp.earlyActive.toneVar));
+    assert(results, 'mientras llena: fondo plano sin ornamentos (sin degradado, sin sparkles)',
+      !!dp.earlyActive && dp.earlyActive.bgImage === 'none' && dp.earlyActive.deco === 0,
+      'bg=' + (dp.earlyActive && dp.earlyActive.bgImage) + ' deco=' + (dp.earlyActive && dp.earlyActive.deco));
+    assert(results, 'al cerrar en Super: ignición — dormido fuera, skin viva + sparkles',
+      !!dp.closed && dp.closed.dormant === false && dp.closed.rung === 'adhd-rung-super' && dp.closed.deco === 3,
+      'rung=' + (dp.closed && dp.closed.rung) + ' deco=' + (dp.closed && dp.closed.deco));
+    assert(results, 'al cerrar: el degradado de la piel viva está (la recompensa se ve)',
+      !!dp.closed && typeof dp.closed.bgImage === 'string' && dp.closed.bgImage.indexOf('linear-gradient') === 0,
+      'bg=' + (dp.closed && dp.closed.bgImage));
+    assert(results, 'el siguiente tramo que llena también es dormido',
+      !!dp.nextActive && dp.nextActive.dormant === true && dp.nextActive.deco === 0,
+      'dormido=' + (dp.nextActive && dp.nextActive.dormant) + ' deco=' + (dp.nextActive && dp.nextActive.deco));
+    // Ruta calma: el dormido es igual (la calma no cambia el llenado) y el cierre
+    // es identidad estática — gradiente presente, CERO nodos de ornamento.
+    const dc = reports['/lesson/dormant-calm-system/'] || {};
+    const dcp = dc.dormant || {};
+    assert(results, 'bajo calma el dormido es el mismo (la calma no cambia el llenado)',
+      !!dcp.earlyActive && dcp.earlyActive.dormant === true && dcp.earlyActive.bgImage === 'none',
+      'dormido=' + (dcp.earlyActive && dcp.earlyActive.dormant) + ' bg=' + (dcp.earlyActive && dcp.earlyActive.bgImage));
+    assert(results, 'bajo calma el cierre conserva el degradado (identidad estática)',
+      !!dcp.closed && typeof dcp.closed.bgImage === 'string' && dcp.closed.bgImage.indexOf('linear-gradient') === 0,
+      'bg=' + (dcp.closed && dcp.closed.bgImage));
+    assert(results, 'bajo calma el cierre crea CERO nodos de ornamento',
+      !!dcp.closed && dcp.closed.deco === 0,
+      'deco=' + (dcp.closed && dcp.closed.deco));
     // (la ruta navonly no corre la fase de efectos: no entra en las comparaciones)
   } finally {
     server.close();
