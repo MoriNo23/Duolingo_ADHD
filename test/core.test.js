@@ -723,6 +723,78 @@ describe('animations-panel-setting: el control esta en el panel', () => {
   });
 });
 
+// duolingo-native-panel-skin: el panel habla la ESTRUCTURA Feather (bordes 2px,
+// secciones como filas divididas, botones secundarios chunky, labels bold).
+// El CSS no llega al nucleo puro, asi que el ancla es el fuente publicado: es
+// el mismo archivo que se instala y la piel es lo que hay que proteger.
+// Ver el delta de settings-panel-visuals en el change.
+describe('duolingo-native-panel-skin: el panel viste la estructura Feather', () => {
+  const src = publishedSource();
+
+  function regla(selector) {
+    // Anclado a inicio de linea: el bloque dark (body.adhd-dark ...) vive ANTES
+    // en el archivo, y sin el ancla '.adhd-panel' matchearia la regla oscura.
+    const m = src.match(new RegExp('^\\s*' + selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ' \\{[^}]*\\}', 'm'));
+    return m ? m[0] : '';
+  }
+
+  test('la card lleva el borde 2px feather', () => {
+    assert.equal(regla('.adhd-panel').includes('border:2px solid #e5e5e5'), true,
+      'la card necesita border:2px solid #e5e5e5 (firma de card Feather)');
+  });
+
+  test('las secciones son filas divididas, no chips teñidos', () => {
+    const summary = regla('.adhd-panel summary');
+    assert.equal(summary.includes('rgba(28,176,246,.08)'), false,
+      'el chip teñido rgba(28,176,246,.08) tiene que desaparecer');
+    assert.equal(summary.includes('border-bottom:2px solid #e5e5e5'), true,
+      'la fila de seccion necesita border-bottom:2px solid #e5e5e5');
+  });
+
+  test('los botones son secundarios feather completos', () => {
+    const btn = regla('.adhd-panel button');
+    assert.equal(btn.includes('text-transform:uppercase'), true, 'falta text-transform:uppercase');
+    assert.equal(btn.includes('border:2px solid #e5e5e5'), true, 'falta el borde 2px');
+    assert.equal(btn.includes('box-shadow:0 4px 0 #d3d3d3'), true, 'falta la sombra dura 4px');
+    assert.equal(btn.includes('font:700 15px'), true, 'falta font:700 15px');
+  });
+
+  test('los textos visten feather (labels bold, titulo grande)', () => {
+    const label = regla('.adhd-panel label');
+    assert.equal(label.includes('font-weight:700'), true, 'los labels necesitan font-weight:700');
+    assert.equal(label.includes('color:#3c3c3c'), true, 'los labels necesitan color:#3c3c3c');
+    const h4 = regla('.adhd-panel h4');
+    assert.equal(h4.includes('font-size:17px'), true, 'el titulo necesita 17px');
+    assert.equal(h4.includes('font-weight:800'), true, 'el titulo necesita peso 800');
+  });
+
+  test('footer y divisores pasan a 2px', () => {
+    assert.equal(regla('.adhd-foot').includes('border-top:2px solid #e5e5e5'), true,
+      'el footer necesita border-top:2px');
+    assert.equal(regla('.adhd-divider').includes('border-top:2px solid #e5e5e5'), true,
+      'el divisor necesita border-top:2px');
+  });
+
+  test('los readouts inline mueren: clase adhd-readout, sin color hardcodeado', () => {
+    assert.equal(/\.adhd-readout \{/.test(src), true, 'falta la regla .adhd-readout');
+    const plantilla = src.slice(src.indexOf("panel.className = 'adhd-panel'"), src.indexOf('panel.innerHTML = html'));
+    assert.equal(plantilla.includes('color:#666'), false, 'el promedio sigue con color inline #666');
+    assert.equal(plantilla.includes('color:#999'), false, 'el "sin datos" sigue con color inline #999');
+  });
+
+  test('el modo oscuro espeja la estructura', () => {
+    assert.equal(regla('body.adhd-dark .adhd-panel').includes('border:2px solid #3a4a52'), true,
+      'la card oscura necesita border:2px solid #3a4a52');
+    const summary = regla('body.adhd-dark .adhd-panel summary');
+    assert.equal(summary.includes('border-bottom:2px solid #3a4a52'), true,
+      'la fila oscura necesita border-bottom:2px solid #3a4a52');
+    assert.equal(summary.includes('rgba(132,216,255,.08)'), false,
+      'el chip teñido oscuro tiene que desaparecer');
+    assert.equal(regla('body.adhd-dark .adhd-readout').includes('color:#8fa3ad'), true,
+      'el readout oscuro necesita color:#8fa3ad');
+  });
+});
+
 describe('seg-skin-earned-at-close: el kill switch calla el MOVIMIENTO de la piel, no su identidad', () => {
   const src = publishedSource();
 

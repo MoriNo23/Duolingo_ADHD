@@ -2,7 +2,7 @@
 // @name           Duolingo ADHD — Progress bar milestones (for the easily distracted / bored)
 // @name:es        Duolingo ADHD — Hitos de barra de progreso (para los que se aburren / se distraen)
 // @namespace      https://github.com/MoriNo23/duolingo-adhd
-// @version        2.23.0
+// @version        2.24.0
 // @description    Divide la barra de progreso de la lección en tramos. Modo tiempo: cada tramo arranca en Super y cada vez que el riel se agota baja un peldaño (Super→Madera); el peldaño en que cierres el tramo queda congelado. Cerrá rápido para congelar mejor jerarquía. Recompensas a pantalla completa en peldaños altos (Racha/Diamante/Super), cronómetro Baloo 2, diario local + panel EN/ES. Con sonido: fanfarria por peldaño y recordatorio periódico (Ajustes → Sonido). Mantiene el diseño nativo de Duolingo.
 // @description:en Splits the lesson progress bar into segments. Timer mode: every segment starts at the top tier (Super) and each time the rail runs out it drops one tier (Super→Wood) — the tier you close the segment on gets frozen. Close fast to freeze a better tier. Full-screen reward effects on high tiers (Streak/Diamond/Super), Baloo 2 clock, local journal + EN/ES settings. With sound: a tier fanfare on every segment close plus a periodic reminder (Settings → Sound). Keeps Duolingo's native design.
 // @description:es Divide la barra de progreso de la lección en tramos. Modo tiempo: cada tramo arranca en el nivel Super y va bajando de peldaño (Madera→Super) mientras se quema el presupuesto — cerrá rápido para congelar mejor jerarquía. Efectos de recompensa a pantalla completa en los peldaños altos (Racha/Diamante/Super), partículas, cronómetro Baloo 2, diario local + panel EN/ES. Con sonido: fanfarria por peldaño y recordatorio periódico (Ajustes → Sonido). Mantiene el diseño nativo de Duolingo.
@@ -1325,7 +1325,7 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
     GM_addStyle(`
       body.adhd-dark .adhd-btn { background:#1f2b33; color:#1cb0f6; box-shadow:none; }
       body.adhd-dark .adhd-btn:hover { background:#27363f; }
-      body.adhd-dark .adhd-panel { background:#1e2a31; border-radius:16px 0 0 16px; box-shadow:-2px 0 0 #0c1419; }
+      body.adhd-dark .adhd-panel { background:#1e2a31; border:2px solid #3a4a52; border-radius:16px 0 0 16px; box-shadow:-2px 0 0 #0c1419; }
       body.adhd-dark .adhd-panel label { color:#c9d1d9; }
       body.adhd-dark .adhd-panel input[type=range], body.adhd-dark .adhd-panel select { background:#142026; border-color:#3a4a52; color:#e5e5e5; }
       body.adhd-dark .adhd-panel h4 { color:#fff; }
@@ -1335,9 +1335,10 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
       body.adhd-dark .adhd-divider { border-top-color:#3a4a52; }
       body.adhd-dark .adhd-panel button { background:#142026; border-color:#3a4a52; color:#e5e5e5; box-shadow:0 4px 0 #0b1216; }
       body.adhd-dark .adhd-panel button:active { box-shadow:0 0 0 #0b1216; }
-      /* timer-mode-ux: dark theme para secciones */
-      body.adhd-dark .adhd-panel summary { color:#84d8ff; background:rgba(132,216,255,.08); }
+      /* timer-mode-ux: dark theme para secciones — duolingo-native-panel-skin: fila dividida */
+      body.adhd-dark .adhd-panel summary { color:#84d8ff; border-bottom:2px solid #3a4a52; }
       body.adhd-dark .adhd-panel .adhd-hint { color:#8fa3ad; }
+      body.adhd-dark .adhd-readout { color:#8fa3ad; }
     `);
     function isDarkTheme() {
       const bg = getComputedStyle(document.body).backgroundColor || '';
@@ -1831,27 +1832,34 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
       .adhd-btn svg { width:22px; height:22px; }
 
       /* ===== panel config (anclado al borde, jerarquía header/secciones/footer) ===== */
-      .adhd-panel { position:fixed; z-index:1000; right:0; top:152px; width:280px; box-sizing:border-box; max-width:calc(100vw - 16px); max-height:calc(100vh - 170px); overflow-y:auto; background:#fff; border-radius:16px 0 0 16px; box-shadow:-2px 0 0 #e5e5e5; padding:16px; font-family:duolingo-sans,"Duolingo Sans",sans-serif; }
+      /* duolingo-native-panel-skin: estructura Feather — card con borde 2px,
+         secciones como filas divididas, botones secundarios chunky, labels
+         bold. El acento azul y la sombra dura se mantienen (spec). */
+      .adhd-panel { position:fixed; z-index:1000; right:0; top:152px; width:280px; box-sizing:border-box; max-width:calc(100vw - 16px); max-height:calc(100vh - 170px); overflow-y:auto; background:#fff; border:2px solid #e5e5e5; border-radius:16px 0 0 16px; box-shadow:-2px 0 0 #e5e5e5; padding:16px; font-family:duolingo-sans,"Duolingo Sans",sans-serif; }
       .adhd-head { margin:0 0 10px; }
       .adhd-eyebrow { font-size:10px; font-weight:800; letter-spacing:.12em; color:#1cb0f6; }
-      .adhd-panel h4 { margin:2px 0 0; font-size:15px; color:#0a7ec2; } /* #1cb0f6 fallaba WCAG AA (2.9:1); #0a7ec2 = 5.6:1 */
-      .adhd-panel label { display:block; font-size:13px; color:#4b4b4b; margin:10px 0 4px; }
+      .adhd-panel h4 { margin:2px 0 0; font-size:17px; font-weight:800; color:#0a7ec2; } /* #1cb0f6 fallaba WCAG AA (2.9:1); #0a7ec2 = 5.6:1 */
+      .adhd-panel label { display:block; font-size:13px; font-weight:700; color:#3c3c3c; margin:10px 0 4px; }
       .adhd-panel input[type=range] { width:100%; }
       .adhd-panel .adhd-val { font-weight:700; color:#0a7ec2; }
       /* timer-mode-ux: secciones colapsables + hints */
       .adhd-panel details { margin:10px 0 4px; }
-      .adhd-panel summary { cursor:pointer; font-weight:700; font-size:14px; color:#0a7ec2; padding:6px 8px; border-radius:10px; background:rgba(28,176,246,.08); list-style:none; display:flex; align-items:center; gap:6px; user-select:none; }
+      /* duolingo-native-panel-skin: fila dividida, sin chip teñido */
+      .adhd-panel summary { cursor:pointer; font-weight:700; font-size:15px; color:#0a7ec2; padding:10px 2px; border-bottom:2px solid #e5e5e5; list-style:none; display:flex; align-items:center; gap:6px; user-select:none; }
       .adhd-panel summary::before { content:'▸'; font-size:11px; transition:transform .15s ease; }
       .adhd-panel details[open] summary::before { transform:rotate(90deg); }
       .adhd-panel summary::-webkit-details-marker { display:none; }
       .adhd-sec-ico { width:15px; height:15px; flex:none; }
       .adhd-sec-body { padding:2px 2px 2px 8px; font-size:12px; color:#4b4b4b; }
-      .adhd-foot { margin-top:12px; border-top:1px solid #e5e5e5; padding-top:10px; }
+      .adhd-foot { margin-top:12px; border-top:2px solid #e5e5e5; padding-top:10px; }
       .adhd-panel .adhd-hint { font-size:11px; color:#777; margin:6px 0 2px; line-height:1.35; }
-      /* botones del panel: sombra dura 4px estilo Feather (mismo lenguaje que .adhd-btn) */
-      .adhd-panel button { display:block; width:100%; margin-top:10px; padding:7px; background:#fff; border:2px solid #e5e5e5; border-radius:12px; font:700 13px duolingo-sans,"Duolingo Sans",sans-serif; color:#4b4b4b; cursor:pointer; box-shadow:0 4px 0 #d3d3d3; transition:transform .1s ease, box-shadow .1s ease; }
+      /* duolingo-native-panel-skin: readouts (promedio, "sin datos") salen del inline */
+      .adhd-panel .adhd-readout { font-size:12px; color:#777; margin-top:4px; line-height:1.35; }
+      /* botones del panel: secundario Feather (borde 2px, sombra dura 4px, 15px/700 uppercase) */
+      .adhd-panel button { display:block; width:100%; margin-top:10px; padding:10px; background:#fff; border:2px solid #e5e5e5; border-radius:12px; font:700 15px duolingo-sans,"Duolingo Sans",sans-serif; letter-spacing:.02em; text-transform:uppercase; color:#3c3c3c; cursor:pointer; box-shadow:0 4px 0 #d3d3d3; transition:transform .1s ease, box-shadow .1s ease, background .12s ease; }
+      .adhd-panel button:hover { background:#f7f7f7; }
       .adhd-panel button:active { transform:translateY(4px); box-shadow:0 0 0 #d3d3d3; }
-      .adhd-divider { margin-top:12px; border-top:1px solid #e5e5e5; padding-top:10px; }
+      .adhd-divider { margin-top:12px; border-top:2px solid #e5e5e5; padding-top:10px; }
 
       /* =====================================================================
          arena-timer-overhaul: skins por rung (namespace propio, no toca el
@@ -3506,7 +3514,7 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
             <label><input type="checkbox" id="adhd-timer-label" ${cfg.timerShowLabel ? 'checked' : ''}> ${tr(cfg.lang, 'lblTimerLabel')}</label>
             <button id="adhd-test-fx">${tr(cfg.lang, 'btnTestFx')}</button>
             <div class="adhd-hint">${tr(cfg.lang, 'hintTimerGoal')}</div>
-            <div style="font-size:11px;color:#666;margin-top:4px;">${isEn ? 'Avg' : 'Promedio'}: ${avgDisplay}</div>
+            <div class="adhd-readout">${isEn ? 'Avg' : 'Promedio'}: ${avgDisplay}</div>
           </div>
           <label for="adhd-motion">${tr(cfg.lang, 'lblMotion')}</label>
           <select id="adhd-motion">
@@ -3573,7 +3581,7 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
           <div>${tr(cfg.lang, 'jrTotal')}: <strong>${journal.totalLessons}</strong></div>
         `;
       } else {
-        html += `<div style="color:#999;">${tr(cfg.lang, 'jrNoData')}</div>`;
+        html += `<div class="adhd-readout">${tr(cfg.lang, 'jrNoData')}</div>`;
       }
       html += `</div></div></details>`;
 
